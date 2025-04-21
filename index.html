@@ -617,28 +617,14 @@
             segmentCount = parseInt(segmentCountInput.value);
             segmentCountValue.textContent = segmentCount;
             initializeArm();
-            updateReachIndicator(); // Update reach indicator when segment count changes
         });
 
         totalLengthInput.addEventListener('input', () => {
             totalLength = parseInt(totalLengthInput.value);
             totalLengthValue.textContent = totalLength;
             initializeArm();
-            updateReachIndicator(); // Update reach indicator when total length changes
-            
-            // If mouse is locked, ensure the current arm target is within reach
-            if (isPointerLocked && armTargetX !== null && armTargetY !== null) {
-                const clampedPosition = clampMousePosition(armTargetX, armTargetY);
-                armTargetX = clampedPosition.x;
-                armTargetY = clampedPosition.y;
-                
-                // Update lastMouseX/Y to match
-                lastMouseX = armTargetX - camera.x;
-                lastMouseY = armTargetY - camera.y;
-                updateCrosshair(lastMouseX, lastMouseY);
-            }
         });
-        
+
         constraintAngleInput.addEventListener('input', () => {
             maxConstraintAngle = parseInt(constraintAngleInput.value);
             constraintAngleValue.textContent = maxConstraintAngle;
@@ -675,10 +661,39 @@
             reachIndicator.style.left = screenX + 'px';
             reachIndicator.style.top = screenY + 'px';
             
-            // Set diameter to 2x arm length for full reach visualization
-            const diameter = totalLength * 2;
+            // Calculate effective reach distance based on constraints
+            const effectiveReach = calculateEffectiveReach();
+            
+            // Set diameter to 2x effective reach for full reach visualization
+            const diameter = effectiveReach * 2;
             reachIndicator.style.width = diameter + 'px';
             reachIndicator.style.height = diameter + 'px';
+        }
+        
+        // Calculate the effective reach distance accounting for joint constraints
+        function calculateEffectiveReach() {
+            if (segmentCount <= 1) return totalLength;
+            
+            // For a straight arm, reach is totalLength
+            if (maxConstraintAngle >= 180) return totalLength;
+            
+            // Calculate effective reach considering joint constraints
+            // As constraint angle decreases, the effective reach decreases
+            // This is an approximation that provides a more realistic reach limitation
+            
+            // Convert constraint angle to radians
+            const constraintRad = maxConstraintAngle * (Math.PI / 180);
+            
+            // Factor based on constraint angle - ranges from ~0.5 (very constrained) to 1.0 (unconstrained)
+            // This calculation ensures reach gets shorter as constraints get tighter
+            let constraintFactor = Math.sin(constraintRad / 2) / Math.sin(Math.PI / 2);
+            constraintFactor = Math.max(0.5, constraintFactor); // Minimum factor of 0.5
+            
+            // Apply a stronger reduction as segment count increases
+            // More segments with constraints bend more, reducing effective reach
+            const segmentFactor = Math.pow(0.95, segmentCount - 1);
+            
+            return totalLength * constraintFactor * segmentFactor;
         }
         
         // Clamp the mouse position to the maximum reach of the arm
@@ -687,9 +702,12 @@
             const dy = worldY - player.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             
-            // If distance exceeds arm length, clamp to the maximum reach
-            if (dist > totalLength) {
-                const ratio = totalLength / dist;
+            // Calculate effective reach based on constraints
+            const effectiveReach = calculateEffectiveReach();
+            
+            // If distance exceeds effective reach, clamp to the maximum reach
+            if (dist > effectiveReach) {
+                const ratio = effectiveReach / dist;
                 return {
                     x: player.x + dx * ratio,
                     y: player.y + dy * ratio
@@ -740,30 +758,25 @@
             const movementX = e.movementX || e.mozMovementX || e.webkitMovementX || 0;
             const movementY = e.movementY || e.mozMovementY || e.webkitMovementY || 0;
             
-            // Adjust movement scale based on screen resolution to ensure consistent movement
-            const movementScale = 1;
+            // Update the last mouse position
+            lastMouseX += movementX;
+            lastMouseY += movementY;
             
-            // Update the last mouse position with scaled movement
-            lastMouseX += movementX * movementScale;
-            lastMouseY += movementY * movementScale;
+            // Clamp to canvas bounds
+            lastMouseX = Math.max(0, Math.min(canvas.width, lastMouseX));
+            lastMouseY = Math.max(0, Math.min(canvas.height, lastMouseY));
             
-            // Calculate world coordinates for mouse position
+            // Convert screen coordinates to world coordinates
             const worldX = lastMouseX + camera.x;
             const worldY = lastMouseY + camera.y;
             
             // Clamp to arm's maximum reach
             const clampedPosition = clampMousePosition(worldX, worldY);
             
-            // Update last mouse position to match the clamped position
-            lastMouseX = clampedPosition.x - camera.x;
-            lastMouseY = clampedPosition.y - camera.y;
-            
-            // Clamp to canvas bounds just for safety
-            lastMouseX = Math.max(0, Math.min(canvas.width, lastMouseX));
-            lastMouseY = Math.max(0, Math.min(canvas.height, lastMouseY));
-            
             // Update crosshair to the clamped position
-            updateCrosshair(lastMouseX, lastMouseY);
+            const screenX = clampedPosition.x - camera.x;
+            const screenY = clampedPosition.y - camera.y;
+            updateCrosshair(screenX, screenY);
             
             // Set the arm's target
             armTargetX = clampedPosition.x;
@@ -1003,33 +1016,17 @@
                     camera.x = player.x - canvas.width / 2;
                     camera.y = player.y - canvas.height / 2;
                     
-                    // If pointer is locked, update arm target position to maintain its relative position to player
-                    if (isPointerLocked && armTargetX !== null && armTargetY !== null) {
-                        // Recalculate arm target since player has moved
-                        const targetDir = direction(
-                            { x: player.x, y: player.y },
-                            { x: armTargetX, y: armTargetY }
-                        );
-                        const targetDist = distance(
-                            { x: player.x, y: player.y },
-                            { x: armTargetX, y: armTargetY }
-                        );
-                        
-                        // Keep the same relative direction but ensure it stays within reach
-                        const newDist = Math.min(targetDist, totalLength);
-                        armTargetX = player.x + targetDir.x * newDist;
-                        armTargetY = player.y + targetDir.y * newDist;
-                        
-                        // Update lastMouseX/Y to match the new target
-                        lastMouseX = armTargetX - camera.x;
-                        lastMouseY = armTargetY - camera.y;
-                        
-                        // Update crosshair position
-                        updateCrosshair(lastMouseX, lastMouseY);
-                    }
-                    
                     // Update reach indicator position after player movement
                     updateReachIndicator();
+                    
+                    // If pointer is locked, also update the cursor position
+                    // to keep it relative to the player
+                    if (isPointerLocked && armTargetX !== null && armTargetY !== null) {
+                        // Calculate new screen position for cursor
+                        const screenX = armTargetX - camera.x;
+                        const screenY = armTargetY - camera.y;
+                        updateCrosshair(screenX, screenY);
+                    }
                 }
             }
             
@@ -1191,6 +1188,19 @@
                 ctx.fillStyle = 'rgba(100, 255, 100, 0.6)';
                 ctx.fill();
             }
+            
+            // Draw maximum reach circle (debug visualization)
+            const screenX = player.x - camera.x;
+            const screenY = player.y - camera.y;
+            const effectiveReach = calculateEffectiveReach();
+            
+            ctx.beginPath();
+            ctx.arc(screenX, screenY, effectiveReach, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.setLineDash([5, 5]);
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.setLineDash([]);
         }
 
         // Animation loop
@@ -1213,17 +1223,6 @@
                 
                 // Draw player (arm)
                 drawPlayer();
-                
-                // Draw maximum reach circle (debug visualization)
-                const screenX = player.x - camera.x;
-                const screenY = player.y - camera.y;
-                ctx.beginPath();
-                ctx.arc(screenX, screenY, totalLength, 0, Math.PI * 2);
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-                ctx.setLineDash([5, 5]);
-                ctx.lineWidth = 2;
-                ctx.stroke();
-                ctx.setLineDash([]);
             }
             
             // Schedule the next frame
