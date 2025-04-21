@@ -202,6 +202,12 @@
         // Arm segments
         let segments = [];
         let targetPoint = { x: player.x, y: player.y };
+        
+        // ARM CONTROL VARIABLES
+        let armTargetX = null;
+        let armTargetY = null;
+        let armMovementSpeed = 5; // How fast the arm can travel to its target
+        let armReachingTarget = false;
 
         // Random generator with seed for consistent world generation
         class SeededRandom {
@@ -588,6 +594,11 @@
             player.targetX = screenX + camera.x;
             player.targetY = screenY + camera.y;
             
+            // Set the arm's target to the clicked position
+            armTargetX = player.targetX;
+            armTargetY = player.targetY;
+            armReachingTarget = true;
+            
             player.isMoving = true;
         });
 
@@ -774,6 +785,11 @@
                     player.isMoving = false;
                     player.targetX = null;
                     player.targetY = null;
+                    
+                    // When player stops, set arm target to current position
+                    armTargetX = player.x;
+                    armTargetY = player.y;
+                    armReachingTarget = false;
                 } else {
                     // Move player towards target
                     player.x += dir.x * moveSpeed;
@@ -783,11 +799,43 @@
                     camera.x = player.x - canvas.width / 2;
                     camera.y = player.y - canvas.height / 2;
                     
-                    // Set the target point ahead of the player in the direction of movement
-                    targetPoint.x = player.x + dir.x * 50; // Target ahead of player
-                    targetPoint.y = player.y + dir.y * 50;
+                    // Only set target when player is moving AND arm isn't already reaching
+                    if (!armReachingTarget) {
+                        // Set the target to where player is going
+                        armTargetX = player.targetX;
+                        armTargetY = player.targetY;
+                        armReachingTarget = true;
+                    }
                 }
             }
+            
+            // Update arm target position gradually
+            updateArmTarget();
+        }
+        
+        // Update the arm's target position with realistic movement speed
+        function updateArmTarget() {
+            if (armTargetX === null || armTargetY === null) {
+                // If there's no arm target, the target is the player
+                targetPoint.x = player.x;
+                targetPoint.y = player.y;
+                return;
+            }
+            
+            // Calculate distance from current arm target to desired target
+            const currentDist = distance(targetPoint, { x: armTargetX, y: armTargetY });
+            
+            // If we're already close to the target, just set it exactly
+            if (currentDist < armMovementSpeed) {
+                targetPoint.x = armTargetX;
+                targetPoint.y = armTargetY;
+                return;
+            }
+            
+            // Otherwise, move the arm target towards the desired target at a limited speed
+            const dir = direction(targetPoint, { x: armTargetX, y: armTargetY });
+            targetPoint.x += dir.x * armMovementSpeed;
+            targetPoint.y += dir.y * armMovementSpeed;
         }
         
         // Check for item collection
@@ -907,6 +955,17 @@
                 ctx.strokeStyle = 'rgba(255, 100, 100, 0.7)';
                 ctx.lineWidth = 2;
                 ctx.stroke();
+                
+                // Also draw the current arm target point for debugging
+                const screenArmTarget = {
+                    x: targetPoint.x - camera.x,
+                    y: targetPoint.y - camera.y
+                };
+                
+                ctx.beginPath();
+                ctx.arc(screenArmTarget.x, screenArmTarget.y, 5, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(100, 255, 100, 0.6)';
+                ctx.fill();
             }
         }
 
