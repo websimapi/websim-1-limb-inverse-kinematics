@@ -12,17 +12,20 @@ export function setupUI(canvas, player, camera, segments, gameState, armState) {
     const tutorial = document.getElementById('tutorial');
     const startButton = document.getElementById('startButton');
 
+    // Import the initializeArm function from the player module
+    import { initializeArm as reinitializeArm } from './player.js';
+
     // Event listeners for UI controls
     segmentCountInput.addEventListener('input', () => {
         gameState.segmentCount = parseInt(segmentCountInput.value);
         segmentCountValue.textContent = gameState.segmentCount;
-        initializeArm();
+        reinitializeArm(player, segments, gameState.segmentCount, gameState.totalLength);
     });
 
     totalLengthInput.addEventListener('input', () => {
         gameState.totalLength = parseInt(totalLengthInput.value);
         totalLengthValue.textContent = gameState.totalLength;
-        initializeArm();
+        reinitializeArm(player, segments, gameState.segmentCount, gameState.totalLength);
     });
 
     constraintAngleInput.addEventListener('input', () => {
@@ -39,7 +42,7 @@ export function setupUI(canvas, player, camera, segments, gameState, armState) {
     startButton.addEventListener('click', () => {
         tutorial.classList.add('hidden');
         gameState.gameStarted = true;
-        initializeArm();
+        reinitializeArm(player, segments, gameState.segmentCount, gameState.totalLength);
     });
 
     // Track mouse movement to extend arm in real-time
@@ -76,18 +79,4 @@ export function setupUI(canvas, player, camera, segments, gameState, armState) {
         
         player.isMoving = true;
     });
-
-    // Helper function to initialize the arm with current settings
-    function initializeArm() {
-        segments.length = 0; // Clear existing segments
-        const segmentLength = gameState.totalLength / gameState.segmentCount;
-        
-        // Start with a straight arm pointing right
-        for (let i = 0; i <= gameState.segmentCount; i++) {
-            segments.push({
-                x: player.x,
-                y: player.y - i * segmentLength
-            });
-        }
-    }
 }
