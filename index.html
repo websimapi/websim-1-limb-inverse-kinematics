@@ -107,17 +107,6 @@
         .hidden {
             display: none;
         }
-        
-        .interact-indicator {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            color: white;
-            padding: 8px 12px;
-            border-radius: 4px;
-            display: none;
-        }
     </style>
 </head>
 <body>
@@ -151,17 +140,11 @@
             <div>Items collected: <span id="itemsCollected">0</span></div>
         </div>
         
-        <div class="interact-indicator" id="interactIndicator">
-            Press 'E' to interact
-        </div>
-        
         <div class="tutorial" id="tutorial">
             <h2>IK Explorer</h2>
             <p>Click anywhere to move your character through the infinite procedurally generated world.</p>
             <p>Explore different biomes, collect items, and discover new areas!</p>
             <p>Your character is represented by an inverse kinematics arm that will reach toward your destination.</p>
-            <p>The arm will automatically stop at obstacles, and you can interact with objects by reaching them.</p>
-            <p>Press 'E' when the arm is near an item to grab it.</p>
             <button id="startButton">Start Exploring</button>
         </div>
     </div>
@@ -188,7 +171,6 @@
         const itemsCollectedDisplay = document.getElementById('itemsCollected');
         const tutorial = document.getElementById('tutorial');
         const startButton = document.getElementById('startButton');
-        const interactIndicator = document.getElementById('interactIndicator');
 
         // Configuration variables
         let segmentCount = parseInt(segmentCountInput.value);
@@ -226,15 +208,6 @@
         let armTargetY = null;
         let armMovementSpeed = 5; // How fast the arm can travel to its target
         let armReachingTarget = false;
-
-        // New variables for grabbing and interaction
-        let isGrabbing = false;
-        let canGrab = false;
-        let grabbedItem = null;
-
-        // Add reach limit and collision variables
-        const MAX_REACH_DISTANCE = totalLength * 0.95; // Maximum reach slightly less than total arm length
-        let showReachLimit = false;
 
         // Random generator with seed for consistent world generation
         class SeededRandom {
@@ -278,7 +251,6 @@
                 this.y = y;
                 this.items = [];
                 this.explored = false;
-                this.features = [];
                 
                 // Seed based on chunk position for consistent generation
                 const chunkSeed = (x * 13337 + y * 92083) % 998244353;
@@ -337,13 +309,13 @@
                             x: random.range(0, CHUNK_SIZE),
                             y: random.range(0, CHUNK_SIZE),
                             size: random.range(5, 15),
-                            collected: false,
-                            interactable: true
+                            collected: false
                         });
                     }
                 }
                 
                 // Generate terrain features
+                this.features = [];
                 if (this.biome === BIOMES.FOREST) {
                     // Add trees
                     const treeCount = random.intRange(5, 15);
@@ -388,11 +360,6 @@
                             size: random.range(5, 15)
                         });
                     }
-                }
-
-                // Add collision data to features
-                for (let i = 0; i < this.features.length; i++) {
-                    this.features[i] = addCollisionData(this.features[i]);
                 }
             }
             
@@ -559,80 +526,6 @@
                 }
                 return false;
             }
-
-            // Check collisions with features in this chunk
-            checkCollision(x, y, radius) {
-                const relativeX = x - this.getWorldX();
-                const relativeY = y - this.getWorldY();
-                
-                for (const feature of this.features) {
-                    if (feature.collidable) {
-                        const distance = Math.sqrt(
-                            (relativeX - feature.x) ** 2 + 
-                            (relativeY - feature.y) ** 2
-                        );
-                        
-                        if (distance < (feature.collisionRadius + radius)) {
-                            return {
-                                collided: true,
-                                feature: feature,
-                                normal: {
-                                    x: (relativeX - feature.x) / distance,
-                                    y: (relativeY - feature.y) / distance
-                                }
-                            };
-                        }
-                    }
-                }
-                
-                return { collided: false };
-            }
-            
-            // Check for grabable items
-            checkGrabbableItems(x, y, radius) {
-                const relativeX = x - this.getWorldX();
-                const relativeY = y - this.getWorldY();
-                
-                for (const item of this.items) {
-                    if (!item.collected && item.interactable) {
-                        const distance = Math.sqrt(
-                            (relativeX - item.x) ** 2 + 
-                            (relativeY - item.y) ** 2
-                        );
-                        
-                        if (distance < (item.size + radius)) {
-                            return {
-                                canGrab: true,
-                                item: item,
-                                chunkX: this.x,
-                                chunkY: this.y,
-                                worldX: this.getWorldX() + item.x,
-                                worldY: this.getWorldY() + item.y
-                            };
-                        }
-                    }
-                }
-                
-                return { canGrab: false };
-            }
-        }
-        
-        // Add collision-related variables to features
-        function addCollisionData(feature) {
-            feature.collidable = true;
-            
-            if (feature.type === 'tree') {
-                // Trunk and foliage collision
-                feature.collisionRadius = feature.size / 2;
-            } else if (feature.type === 'rock') {
-                feature.collisionRadius = feature.size / 2;
-            } else if (feature.type === 'cactus') {
-                feature.collisionRadius = feature.size / 3;
-            } else {
-                feature.collidable = false;
-            }
-            
-            return feature;
         }
         
         // Get or create a chunk at the specified coordinates
@@ -663,16 +556,12 @@
             segmentCount = parseInt(segmentCountInput.value);
             segmentCountValue.textContent = segmentCount;
             initializeArm();
-            // Update MAX_REACH_DISTANCE based on new arm length
-            MAX_REACH_DISTANCE = totalLength * 0.95;
         });
 
         totalLengthInput.addEventListener('input', () => {
             totalLength = parseInt(totalLengthInput.value);
             totalLengthValue.textContent = totalLength;
             initializeArm();
-            // Update MAX_REACH_DISTANCE based on new arm length
-            MAX_REACH_DISTANCE = totalLength * 0.95;
         });
 
         constraintAngleInput.addEventListener('input', () => {
@@ -721,78 +610,106 @@
             const screenY = e.clientY - rect.top;
             
             // Convert screen coordinates to world coordinates
-            const worldX = screenX + camera.x;
-            const worldY = screenY + camera.y;
+            const clickWorldX = screenX + camera.x;
+            const clickWorldY = screenY + camera.y;
             
-            // Calculate distance to clicked point
-            const clickDist = distance(
-                { x: player.x, y: player.y },
-                { x: worldX, y: worldY }
-            );
+            // Check if click is within arm's reach
+            const totalArmLength = totalLength; // The arm's maximum reach distance
+            const distToClick = distance({ x: player.x, y: player.y }, { x: clickWorldX, y: clickWorldY });
             
-            if (clickDist <= MAX_REACH_DISTANCE) {
-                // If within reach, set the target directly
-                player.targetX = worldX;
-                player.targetY = worldY;
+            if (distToClick <= totalArmLength) {
+                // Click is within reach - use the exact position
+                player.targetX = clickWorldX;
+                player.targetY = clickWorldY;
             } else {
-                // If beyond reach, set target to maximum reachable point in that direction
+                // Click is beyond reach - find the furthest reachable point in that direction
                 const dir = direction(
                     { x: player.x, y: player.y },
-                    { x: worldX, y: worldY }
+                    { x: clickWorldX, y: clickWorldY }
                 );
                 
-                player.targetX = player.x + dir.x * MAX_REACH_DISTANCE;
-                player.targetY = player.y + dir.y * MAX_REACH_DISTANCE;
+                // Calculate the point at maximum reach distance in the direction of the click
+                player.targetX = player.x + dir.x * totalArmLength;
+                player.targetY = player.y + dir.y * totalArmLength;
                 
-                // Show reach limit indicator briefly
-                showReachLimit = true;
-                setTimeout(() => {
-                    showReachLimit = false;
-                }, 1000);
+                // Visual feedback that the click was clamped (optional)
+                createClampedClickIndicator(clickWorldX, clickWorldY, player.targetX, player.targetY);
             }
             
             player.isMoving = true;
         });
 
-        // Handle grab/interaction key press
-        document.addEventListener('keydown', (e) => {
-            if (!gameStarted) return;
+        // Create a visual indicator when a click is clamped to maximum reach
+        function createClampedClickIndicator(originalX, originalY, clampedX, clampedY) {
+            // This is a simple visual effect to show the user their click was clamped
+            // It will create a small red X at the original click location and a green circle at the clamped location
             
-            if (e.key.toLowerCase() === 'e') {
-                if (canGrab && !isGrabbing) {
-                    // Start grabbing the item
-                    isGrabbing = true;
-                    grabbedItem = currentGrabbableItem;
-                    // Visual feedback could be added here
-                } else if (isGrabbing) {
-                    // Release the grabbed item
-                    isGrabbing = false;
-                    
-                    // If we're holding a collected item, mark it as collected
-                    if (grabbedItem) {
-                        const chunk = getChunk(grabbedItem.chunkX, grabbedItem.chunkY);
-                        let item = null;
-                        
-                        // Find the item in the chunk
-                        for (const i of chunk.items) {
-                            if (i === grabbedItem.item) {
-                                item = i;
-                                break;
-                            }
-                        }
-                        
-                        if (item && !item.collected) {
-                            item.collected = true;
-                            itemsCollected++;
-                            itemsCollectedDisplay.textContent = itemsCollected;
-                        }
-                        
-                        grabbedItem = null;
-                    }
-                }
-            }
-        });
+            // We'll store these visuals as temporary objects to be drawn for a few frames
+            const indicator = {
+                originalX, 
+                originalY,
+                clampedX,
+                clampedY,
+                frameCount: 0,
+                maxFrames: 60 // Show for 60 frames (about 1 second)
+            };
+            
+            clickIndicators.push(indicator);
+        }
         
+        // Array to store temporary click indicators
+        let clickIndicators = [];
+        
+        // Function to update and draw click indicators
+        function updateClickIndicators() {
+            // Update all indicators
+            clickIndicators = clickIndicators.filter(indicator => {
+                indicator.frameCount++;
+                return indicator.frameCount < indicator.maxFrames;
+            });
+            
+            // Draw all indicators
+            clickIndicators.forEach(indicator => {
+                const alpha = 1 - (indicator.frameCount / indicator.maxFrames); // Fade out over time
+                
+                // Draw at original click location (red X)
+                const screenOriginalX = indicator.originalX - camera.x;
+                const screenOriginalY = indicator.originalY - camera.y;
+                
+                ctx.globalAlpha = alpha;
+                ctx.strokeStyle = 'rgba(255, 50, 50, 0.8)';
+                ctx.lineWidth = 3;
+                
+                // X mark
+                ctx.beginPath();
+                ctx.moveTo(screenOriginalX - 10, screenOriginalY - 10);
+                ctx.lineTo(screenOriginalX + 10, screenOriginalY + 10);
+                ctx.moveTo(screenOriginalX + 10, screenOriginalY - 10);
+                ctx.lineTo(screenOriginalX - 10, screenOriginalY + 10);
+                ctx.stroke();
+                
+                // Draw at clamped location (green circle)
+                const screenClampedX = indicator.clampedX - camera.x;
+                const screenClampedY = indicator.clampedY - camera.y;
+                
+                ctx.fillStyle = 'rgba(50, 255, 50, 0.5)';
+                ctx.beginPath();
+                ctx.arc(screenClampedX, screenClampedY, 10, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw a line connecting them
+                ctx.strokeStyle = 'rgba(150, 150, 150, 0.5)';
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(screenOriginalX, screenOriginalY);
+                ctx.lineTo(screenClampedX, screenClampedY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+                ctx.globalAlpha = 1.0; // Reset alpha
+            });
+        }
+
         // Calculate distance between two points
         function distance(p1, p2) {
             const dx = p2.x - p1.x;
@@ -868,123 +785,32 @@
             return false; // No constraint needed
         }
 
-        // Check for collisions with all nearby chunks
-        function checkWorldCollisions(x, y, radius) {
-            const chunkX = Math.floor(x / CHUNK_SIZE);
-            const chunkY = Math.floor(y / CHUNK_SIZE);
-            
-            // Check surrounding chunks for collisions
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    const chunk = getChunk(chunkX + dx, chunkY + dy);
-                    const collision = chunk.checkCollision(x, y, radius);
-                    
-                    if (collision.collided) {
-                        return collision;
-                    }
-                }
-            }
-            
-            return { collided: false };
-        }
-        
-        // Check for grabable items in all nearby chunks
-        function checkWorldGrabbables(x, y, radius) {
-            const chunkX = Math.floor(x / CHUNK_SIZE);
-            const chunkY = Math.floor(y / CHUNK_SIZE);
-            
-            // Check surrounding chunks for grabbable items
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    const chunk = getChunk(chunkX + dx, chunkY + dy);
-                    const grabInfo = chunk.checkGrabbableItems(x, y, radius);
-                    
-                    if (grabInfo.canGrab) {
-                        return grabInfo;
-                    }
-                }
-            }
-            
-            return { canGrab: false };
-        }
-
         // FABRIK algorithm implementation
         function fabrik(target) {
             if (segments.length < 2) return false;
             
-            // Ensure target has finite coordinates
-            if (!isFinite(target.x) || !isFinite(target.y)) {
-                console.warn("Non-finite target coordinates provided to FABRIK", target);
-                return false;
-            }
-            
             // Get segment lengths
             const lengths = [];
             for (let i = 0; i < segments.length - 1; i++) {
-                // Ensure segments have finite coordinates
-                if (!isFinite(segments[i].x) || !isFinite(segments[i].y) || 
-                    !isFinite(segments[i+1].x) || !isFinite(segments[i+1].y)) {
-                    console.warn("Non-finite segment coordinates detected", i, segments[i], segments[i+1]);
-                    // Reset the problematic segment to a safe value
-                    if (!isFinite(segments[i].x) || !isFinite(segments[i].y)) {
-                        segments[i] = { x: player.x, y: player.y };
-                    }
-                    if (!isFinite(segments[i+1].x) || !isFinite(segments[i+1].y)) {
-                        segments[i+1] = { x: player.x, y: player.y };
-                    }
-                }
-                
                 lengths.push(distance(segments[i], segments[i+1]));
             }
             
-            // Calculate the total arm length
+            // Get the total arm length
             const armLength = lengths.reduce((sum, length) => sum + length, 0);
             
             // Check if target is reachable
             const distToTarget = distance(segments[0], target);
             
-            // If target is too far, extend arm in target direction up to max length
+            // If target is too far, extend arm in target direction
             if (distToTarget > armLength) {
                 const dir = direction(segments[0], target);
                 
-                // Get the point at maximum reach in that direction
-                const maxReachPoint = {
-                    x: segments[0].x + dir.x * armLength,
-                    y: segments[0].y + dir.y * armLength
-                };
-                
-                // Check if this point collides with obstacles
-                let currentPoint = { ...segments[0] };
+                // Place all segments along the direction to target
                 let currentDist = 0;
-                
-                // Place segments along direction, checking for collisions
                 for (let i = 0; i < segments.length - 1; i++) {
-                    const segmentDir = { ...dir };
-                    let segmentLength = lengths[i];
-                    let nextPoint = {
-                        x: currentPoint.x + segmentDir.x * segmentLength,
-                        y: currentPoint.y + segmentDir.y * segmentLength
-                    };
-                    
-                    // Check for collisions with this segment
-                    const collision = checkWorldCollisions(nextPoint.x, nextPoint.y, 6);
-                    
-                    // If collision, adjust the point to avoid the obstacle
-                    if (collision.collided) {
-                        // Push out of collision by the normal direction
-                        const pushDistance = 6 + collision.feature.collisionRadius - 
-                                           distance(nextPoint, {
-                                               x: collision.feature.x + getChunk(collision.feature.chunkX, collision.feature.chunkY).getWorldX(),
-                                               y: collision.feature.y + getChunk(collision.feature.chunkX, collision.feature.chunkY).getWorldY()
-                                           });
-                        
-                        nextPoint.x += collision.normal.x * pushDistance;
-                        nextPoint.y += collision.normal.y * pushDistance;
-                    }
-                    
-                    segments[i+1].x = nextPoint.x;
-                    segments[i+1].y = nextPoint.y;
-                    currentPoint = nextPoint;
+                    currentDist += lengths[i];
+                    segments[i+1].x = segments[0].x + dir.x * currentDist;
+                    segments[i+1].y = segments[0].y + dir.y * currentDist;
                 }
                 
                 return true; // We did our best with an unreachable target
@@ -1000,31 +826,8 @@
                 // Work backwards from target to base
                 for (let i = segments.length - 2; i >= 0; i--) {
                     const dir = direction(segments[i+1], segments[i]);
-                    
-                    // Calculate new position
-                    let newPos = {
-                        x: segments[i+1].x + dir.x * lengths[i],
-                        y: segments[i+1].y + dir.y * lengths[i]
-                    };
-                    
-                    // Check for collisions with this new position
-                    const collision = checkWorldCollisions(newPos.x, newPos.y, 6);
-                    
-                    // If collision, adjust the position
-                    if (collision.collided) {
-                        // Push out of collision
-                        const pushDistance = 6 + collision.feature.collisionRadius - 
-                                           distance(newPos, {
-                                               x: collision.feature.x + getChunk(collision.feature.chunkX, collision.feature.chunkY).getWorldX(),
-                                               y: collision.feature.y + getChunk(collision.feature.chunkX, collision.feature.chunkY).getWorldY()
-                                           });
-                        
-                        newPos.x += collision.normal.x * pushDistance;
-                        newPos.y += collision.normal.y * pushDistance;
-                    }
-                    
-                    segments[i].x = newPos.x;
-                    segments[i].y = newPos.y;
+                    segments[i].x = segments[i+1].x + dir.x * lengths[i];
+                    segments[i].y = segments[i+1].y + dir.y * lengths[i];
                 }
                 
                 // --- Backward Reaching ---
@@ -1035,31 +838,8 @@
                 // Work forwards from base to end effector
                 for (let i = 0; i < segments.length - 1; i++) {
                     const dir = direction(segments[i], segments[i+1]);
-                    
-                    // Calculate new position
-                    let newPos = {
-                        x: segments[i].x + dir.x * lengths[i],
-                        y: segments[i].y + dir.y * lengths[i]
-                    };
-                    
-                    // Check for collisions with this new position
-                    const collision = checkWorldCollisions(newPos.x, newPos.y, 6);
-                    
-                    // If collision, adjust the position
-                    if (collision.collided) {
-                        // Push out of collision
-                        const pushDistance = 6 + collision.feature.collisionRadius - 
-                                           distance(newPos, {
-                                               x: collision.feature.x + getChunk(collision.feature.chunkX, collision.feature.chunkY).getWorldX(),
-                                               y: collision.feature.y + getChunk(collision.feature.chunkX, collision.feature.chunkY).getWorldY()
-                                           });
-                        
-                        newPos.x += collision.normal.x * pushDistance;
-                        newPos.y += collision.normal.y * pushDistance;
-                    }
-                    
-                    segments[i+1].x = newPos.x;
-                    segments[i+1].y = newPos.y;
+                    segments[i+1].x = segments[i].x + dir.x * lengths[i];
+                    segments[i+1].y = segments[i].y + dir.y * lengths[i];
                 }
                 
                 // Apply joint angle constraints
@@ -1167,63 +947,6 @@
             chunk.checkItemCollection(player.x, player.y, 20); // 20 is collection radius
         }
         
-        // Update the grab/interaction logic
-        let currentGrabbableItem = null;
-        
-        function updateInteractionState() {
-            // Check if arm end effector is near a grabbable item
-            const endEffector = segments[segments.length - 1];
-            const grabInfo = checkWorldGrabbables(endEffector.x, endEffector.y, 20);
-            
-            // Update interaction state
-            if (grabInfo.canGrab && !isGrabbing) {
-                canGrab = true;
-                currentGrabbableItem = grabInfo;
-                interactIndicator.style.display = 'block';
-            } else {
-                canGrab = false;
-                currentGrabbableItem = null;
-                interactIndicator.style.display = 'none';
-            }
-            
-            // If grabbing an item, update its position to follow the arm
-            if (isGrabbing && grabbedItem) {
-                // Position the item at the end effector
-                const worldItemX = endEffector.x;
-                const worldItemY = endEffector.y;
-                
-                // Calculate the chunk coordinates
-                const itemChunkX = Math.floor(worldItemX / CHUNK_SIZE);
-                const itemChunkY = Math.floor(worldItemY / CHUNK_SIZE);
-                
-                // Update grabbedItem properties
-                grabbedItem.worldX = worldItemX;
-                grabbedItem.worldY = worldItemY;
-                grabbedItem.item.x = worldItemX - getChunk(itemChunkX, itemChunkY).getWorldX();
-                grabbedItem.item.y = worldItemY - getChunk(itemChunkX, itemChunkY).getWorldY();
-                
-                // If chunk changed, move the item to the new chunk
-                if (itemChunkX !== grabbedItem.chunkX || itemChunkY !== grabbedItem.chunkY) {
-                    // Remove from old chunk
-                    const oldChunk = getChunk(grabbedItem.chunkX, grabbedItem.chunkY);
-                    const newChunk = getChunk(itemChunkX, itemChunkY);
-                    
-                    // Find the item in the old chunk
-                    const itemIndex = oldChunk.items.findIndex(i => i === grabbedItem.item);
-                    
-                    if (itemIndex !== -1) {
-                        // Remove from old chunk and add to new chunk
-                        const item = oldChunk.items.splice(itemIndex, 1)[0];
-                        newChunk.items.push(item);
-                        
-                        // Update grabbed item reference
-                        grabbedItem.chunkX = itemChunkX;
-                        grabbedItem.chunkY = itemChunkY;
-                    }
-                }
-            }
-        }
-        
         // Draw the visible world chunks
         function drawVisibleChunks() {
             // Calculate the chunk coordinates for the player
@@ -1245,9 +968,6 @@
         
         // Draw the player (arm)
         function drawPlayer() {
-            // Draw reach limit
-            drawReachLimit();
-            
             // Draw the arm segments
             for (let i = 0; i < segments.length - 1; i++) {
                 const screenStart = {
@@ -1259,13 +979,6 @@
                     x: segments[i+1].x - camera.x,
                     y: segments[i+1].y - camera.y
                 };
-                
-                // Check for non-finite values before creating the gradient
-                if (!isFinite(screenStart.x) || !isFinite(screenStart.y) || 
-                    !isFinite(screenEnd.x) || !isFinite(screenEnd.y)) {
-                    console.warn("Non-finite coordinate detected in arm segment", i);
-                    continue; // Skip drawing this segment
-                }
                 
                 // Create gradient for segment
                 const segmentGradient = ctx.createLinearGradient(
@@ -1299,25 +1012,19 @@
             }
             
             // Draw end effector (last joint)
-            if (segments.length > 0) {
-                const lastJoint = segments[segments.length - 1];
-                
-                // Check if coordinates are valid
-                if (isFinite(lastJoint.x) && isFinite(lastJoint.y)) {
-                    const screenLastJoint = {
-                        x: lastJoint.x - camera.x,
-                        y: lastJoint.y - camera.y
-                    };
-                    
-                    ctx.beginPath();
-                    ctx.arc(screenLastJoint.x, screenLastJoint.y, 6, 0, Math.PI * 2);
-                    ctx.fillStyle = `hsl(${210 - ((segments.length-1) * 12)}, 70%, 40%)`;
-                    ctx.fill();
-                    ctx.strokeStyle = '#aaa';
-                    ctx.lineWidth = 1;
-                    ctx.stroke();
-                }
-            }
+            const lastJoint = segments[segments.length - 1];
+            const screenLastJoint = {
+                x: lastJoint.x - camera.x,
+                y: lastJoint.y - camera.y
+            };
+            
+            ctx.beginPath();
+            ctx.arc(screenLastJoint.x, screenLastJoint.y, 6, 0, Math.PI * 2);
+            ctx.fillStyle = `hsl(${210 - ((segments.length-1) * 12)}, 70%, 40%)`;
+            ctx.fill();
+            ctx.strokeStyle = '#aaa';
+            ctx.lineWidth = 1;
+            ctx.stroke();
             
             // Draw target indicator if moving
             if (player.isMoving && player.targetX !== null && player.targetY !== null) {
@@ -1355,60 +1062,6 @@
                 ctx.fillStyle = 'rgba(100, 255, 100, 0.6)';
                 ctx.fill();
             }
-            
-            // Draw grabbed item if any
-            if (isGrabbing && grabbedItem) {
-                const lastJoint = segments[segments.length - 1];
-                const screenLastJoint = {
-                    x: lastJoint.x - camera.x,
-                    y: lastJoint.y - camera.y
-                };
-                
-                // Draw the grabbed item at the end effector
-                ctx.fillStyle = getChunk(grabbedItem.chunkX, grabbedItem.chunkY).biome.itemColor;
-                ctx.beginPath();
-                ctx.arc(
-                    screenLastJoint.x,
-                    screenLastJoint.y,
-                    grabbedItem.item.size,
-                    0,
-                    Math.PI * 2
-                );
-                ctx.fill();
-                
-                // Draw grab effect
-                ctx.beginPath();
-                ctx.arc(
-                    screenLastJoint.x,
-                    screenLastJoint.y,
-                    grabbedItem.item.size + 5,
-                    0,
-                    Math.PI * 2
-                );
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-            }
-        }
-        
-        // Draw arm reach limit
-        function drawReachLimit() {
-            // Draw maximum reach circle
-            ctx.beginPath();
-            ctx.arc(
-                player.x - camera.x,
-                player.y - camera.y,
-                MAX_REACH_DISTANCE,
-                0,
-                Math.PI * 2
-            );
-            
-            // Use dashed line for reach limit
-            ctx.setLineDash([5, 5]);
-            ctx.strokeStyle = showReachLimit ? 'rgba(255, 100, 100, 0.8)' : 'rgba(255, 255, 255, 0.2)';
-            ctx.lineWidth = showReachLimit ? 3 : 1;
-            ctx.stroke();
-            ctx.setLineDash([]);
         }
 
         // Animation loop
@@ -1420,13 +1073,8 @@
                 // Update player movement
                 updatePlayerMovement();
                 
-                // Update interaction state
-                updateInteractionState();
-                
-                // Check for item collection (modified to not automatically collect)
-                if (!isGrabbing) {
-                    checkItemCollection();
-                }
+                // Check for item collection
+                checkItemCollection();
                 
                 // Draw world
                 drawVisibleChunks();
@@ -1436,12 +1084,15 @@
                 
                 // Draw player (arm)
                 drawPlayer();
+                
+                // Draw click indicators
+                updateClickIndicators();
             }
             
             // Schedule the next frame
             requestAnimationFrame(animate);
         }
-        
+
         // Initialize game
         initializeArm();
         animate();
