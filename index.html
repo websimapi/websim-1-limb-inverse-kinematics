@@ -617,14 +617,28 @@
             segmentCount = parseInt(segmentCountInput.value);
             segmentCountValue.textContent = segmentCount;
             initializeArm();
+            updateReachIndicator(); // Update reach indicator when segment count changes
         });
 
         totalLengthInput.addEventListener('input', () => {
             totalLength = parseInt(totalLengthInput.value);
             totalLengthValue.textContent = totalLength;
             initializeArm();
+            updateReachIndicator(); // Update reach indicator when total length changes
+            
+            // If mouse is locked, ensure the current arm target is within reach
+            if (isPointerLocked && armTargetX !== null && armTargetY !== null) {
+                const clampedPosition = clampMousePosition(armTargetX, armTargetY);
+                armTargetX = clampedPosition.x;
+                armTargetY = clampedPosition.y;
+                
+                // Update lastMouseX/Y to match
+                lastMouseX = armTargetX - camera.x;
+                lastMouseY = armTargetY - camera.y;
+                updateCrosshair(lastMouseX, lastMouseY);
+            }
         });
-
+        
         constraintAngleInput.addEventListener('input', () => {
             maxConstraintAngle = parseInt(constraintAngleInput.value);
             constraintAngleValue.textContent = maxConstraintAngle;
@@ -726,25 +740,30 @@
             const movementX = e.movementX || e.mozMovementX || e.webkitMovementX || 0;
             const movementY = e.movementY || e.mozMovementY || e.webkitMovementY || 0;
             
-            // Update the last mouse position
-            lastMouseX += movementX;
-            lastMouseY += movementY;
+            // Adjust movement scale based on screen resolution to ensure consistent movement
+            const movementScale = 1;
             
-            // Clamp to canvas bounds
-            lastMouseX = Math.max(0, Math.min(canvas.width, lastMouseX));
-            lastMouseY = Math.max(0, Math.min(canvas.height, lastMouseY));
+            // Update the last mouse position with scaled movement
+            lastMouseX += movementX * movementScale;
+            lastMouseY += movementY * movementScale;
             
-            // Convert screen coordinates to world coordinates
+            // Calculate world coordinates for mouse position
             const worldX = lastMouseX + camera.x;
             const worldY = lastMouseY + camera.y;
             
             // Clamp to arm's maximum reach
             const clampedPosition = clampMousePosition(worldX, worldY);
             
+            // Update last mouse position to match the clamped position
+            lastMouseX = clampedPosition.x - camera.x;
+            lastMouseY = clampedPosition.y - camera.y;
+            
+            // Clamp to canvas bounds just for safety
+            lastMouseX = Math.max(0, Math.min(canvas.width, lastMouseX));
+            lastMouseY = Math.max(0, Math.min(canvas.height, lastMouseY));
+            
             // Update crosshair to the clamped position
-            const screenX = clampedPosition.x - camera.x;
-            const screenY = clampedPosition.y - camera.y;
-            updateCrosshair(screenX, screenY);
+            updateCrosshair(lastMouseX, lastMouseY);
             
             // Set the arm's target
             armTargetX = clampedPosition.x;
@@ -984,17 +1003,33 @@
                     camera.x = player.x - canvas.width / 2;
                     camera.y = player.y - canvas.height / 2;
                     
+                    // If pointer is locked, update arm target position to maintain its relative position to player
+                    if (isPointerLocked && armTargetX !== null && armTargetY !== null) {
+                        // Recalculate arm target since player has moved
+                        const targetDir = direction(
+                            { x: player.x, y: player.y },
+                            { x: armTargetX, y: armTargetY }
+                        );
+                        const targetDist = distance(
+                            { x: player.x, y: player.y },
+                            { x: armTargetX, y: armTargetY }
+                        );
+                        
+                        // Keep the same relative direction but ensure it stays within reach
+                        const newDist = Math.min(targetDist, totalLength);
+                        armTargetX = player.x + targetDir.x * newDist;
+                        armTargetY = player.y + targetDir.y * newDist;
+                        
+                        // Update lastMouseX/Y to match the new target
+                        lastMouseX = armTargetX - camera.x;
+                        lastMouseY = armTargetY - camera.y;
+                        
+                        // Update crosshair position
+                        updateCrosshair(lastMouseX, lastMouseY);
+                    }
+                    
                     // Update reach indicator position after player movement
                     updateReachIndicator();
-                    
-                    // If pointer is locked, also update the cursor position
-                    // to keep it relative to the player
-                    if (isPointerLocked && armTargetX !== null && armTargetY !== null) {
-                        // Calculate new screen position for cursor
-                        const screenX = armTargetX - camera.x;
-                        const screenY = armTargetY - camera.y;
-                        updateCrosshair(screenX, screenY);
-                    }
                 }
             }
             
