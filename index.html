@@ -603,112 +603,35 @@
         // Handle click for movement (only controls player movement now)
         canvas.addEventListener('click', (e) => {
             if (!gameStarted) return;
-            
-            // Get click position relative to canvas
+
             const rect = canvas.getBoundingClientRect();
             const screenX = e.clientX - rect.left;
             const screenY = e.clientY - rect.top;
-            
-            // Convert screen coordinates to world coordinates
-            const clickWorldX = screenX + camera.x;
-            const clickWorldY = screenY + camera.y;
-            
-            // Check if click is within arm's reach
-            const totalArmLength = totalLength; // The arm's maximum reach distance
-            const distToClick = distance({ x: player.x, y: player.y }, { x: clickWorldX, y: clickWorldY });
-            
-            if (distToClick <= totalArmLength) {
-                // Click is within reach - use the exact position
-                player.targetX = clickWorldX;
-                player.targetY = clickWorldY;
-            } else {
-                // Click is beyond reach - find the furthest reachable point in that direction
-                const dir = direction(
-                    { x: player.x, y: player.y },
-                    { x: clickWorldX, y: clickWorldY }
-                );
-                
-                // Calculate the point at maximum reach distance in the direction of the click
-                player.targetX = player.x + dir.x * totalArmLength;
-                player.targetY = player.y + dir.y * totalArmLength;
-                
-                // Visual feedback that the click was clamped (optional)
-                createClampedClickIndicator(clickWorldX, clickWorldY, player.targetX, player.targetY);
-            }
-            
-            player.isMoving = true;
-        });
 
-        // Create a visual indicator when a click is clamped to maximum reach
-        function createClampedClickIndicator(originalX, originalY, clampedX, clampedY) {
-            // This is a simple visual effect to show the user their click was clamped
-            // It will create a small red X at the original click location and a green circle at the clamped location
-            
-            // We'll store these visuals as temporary objects to be drawn for a few frames
-            const indicator = {
-                originalX, 
-                originalY,
-                clampedX,
-                clampedY,
-                frameCount: 0,
-                maxFrames: 60 // Show for 60 frames (about 1 second)
-            };
-            
-            clickIndicators.push(indicator);
-        }
-        
-        // Array to store temporary click indicators
-        let clickIndicators = [];
-        
-        // Function to update and draw click indicators
-        function updateClickIndicators() {
-            // Update all indicators
-            clickIndicators = clickIndicators.filter(indicator => {
-                indicator.frameCount++;
-                return indicator.frameCount < indicator.maxFrames;
-            });
-            
-            // Draw all indicators
-            clickIndicators.forEach(indicator => {
-                const alpha = 1 - (indicator.frameCount / indicator.maxFrames); // Fade out over time
-                
-                // Draw at original click location (red X)
-                const screenOriginalX = indicator.originalX - camera.x;
-                const screenOriginalY = indicator.originalY - camera.y;
-                
-                ctx.globalAlpha = alpha;
-                ctx.strokeStyle = 'rgba(255, 50, 50, 0.8)';
-                ctx.lineWidth = 3;
-                
-                // X mark
-                ctx.beginPath();
-                ctx.moveTo(screenOriginalX - 10, screenOriginalY - 10);
-                ctx.lineTo(screenOriginalX + 10, screenOriginalY + 10);
-                ctx.moveTo(screenOriginalX + 10, screenOriginalY - 10);
-                ctx.lineTo(screenOriginalX - 10, screenOriginalY + 10);
-                ctx.stroke();
-                
-                // Draw at clamped location (green circle)
-                const screenClampedX = indicator.clampedX - camera.x;
-                const screenClampedY = indicator.clampedY - camera.y;
-                
-                ctx.fillStyle = 'rgba(50, 255, 50, 0.5)';
-                ctx.beginPath();
-                ctx.arc(screenClampedX, screenClampedY, 10, 0, Math.PI * 2);
-                ctx.fill();
-                
-                // Draw a line connecting them
-                ctx.strokeStyle = 'rgba(150, 150, 150, 0.5)';
-                ctx.setLineDash([5, 5]);
-                ctx.beginPath();
-                ctx.moveTo(screenOriginalX, screenOriginalY);
-                ctx.lineTo(screenClampedX, screenClampedY);
-                ctx.stroke();
-                ctx.setLineDash([]);
-                
-                ctx.globalAlpha = 1.0; // Reset alpha
-            });
-        }
+            // Convert screen coordinates to world coordinates
+            let worldX = screenX + camera.x;
+            let worldY = screenY + camera.y;
+
+            // Clamp to max arm reach
+            const dx = worldX - player.x;
+            const dy = worldY - player.y;
+            const dist = Math.hypot(dx, dy);
+            const maxReach = totalLength;
+            if (dist > maxReach) {
+                const ratio = maxReach / dist;
+                worldX = player.x + dx * ratio;
+                worldY = player.y + dy * ratio;
+            }
+
+            player.targetX = worldX;
+            player.targetY = worldY;
+            player.isMoving = true;
+
+            // Also point the arm toward this new target
+            armTargetX = worldX;
+            armTargetY = worldY;
+            armReachingTarget = true;
+        });
 
         // Calculate distance between two points
         function distance(p1, p2) {
@@ -1084,9 +1007,6 @@
                 
                 // Draw player (arm)
                 drawPlayer();
-                
-                // Draw click indicators
-                updateClickIndicators();
             }
             
             // Schedule the next frame
