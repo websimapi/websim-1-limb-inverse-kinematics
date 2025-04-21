@@ -581,7 +581,26 @@
             initializeArm();
         });
 
-        // Handle click for movement
+        // Track mouse movement to extend arm in real-time
+        canvas.addEventListener('mousemove', (e) => {
+            if (!gameStarted) return;
+            
+            // Get mouse position relative to canvas
+            const rect = canvas.getBoundingClientRect();
+            const screenX = e.clientX - rect.left;
+            const screenY = e.clientY - rect.top;
+            
+            // Convert screen coordinates to world coordinates
+            const worldX = screenX + camera.x;
+            const worldY = screenY + camera.y;
+            
+            // Set the arm's target to follow the mouse position
+            armTargetX = worldX;
+            armTargetY = worldY;
+            armReachingTarget = true;
+        });
+
+        // Handle click for movement (only controls player movement now)
         canvas.addEventListener('click', (e) => {
             if (!gameStarted) return;
             
@@ -593,11 +612,6 @@
             // Convert screen coordinates to world coordinates
             player.targetX = screenX + camera.x;
             player.targetY = screenY + camera.y;
-            
-            // Set the arm's target to the clicked position
-            armTargetX = player.targetX;
-            armTargetY = player.targetY;
-            armReachingTarget = true;
             
             player.isMoving = true;
         });
@@ -785,11 +799,6 @@
                     player.isMoving = false;
                     player.targetX = null;
                     player.targetY = null;
-                    
-                    // When player stops, set arm target to current position
-                    armTargetX = player.x;
-                    armTargetY = player.y;
-                    armReachingTarget = false;
                 } else {
                     // Move player towards target
                     player.x += dir.x * moveSpeed;
@@ -798,14 +807,6 @@
                     // Update camera to follow player
                     camera.x = player.x - canvas.width / 2;
                     camera.y = player.y - canvas.height / 2;
-                    
-                    // Only set target when player is moving AND arm isn't already reaching
-                    if (!armReachingTarget) {
-                        // Set the target to where player is going
-                        armTargetX = player.targetX;
-                        armTargetY = player.targetY;
-                        armReachingTarget = true;
-                    }
                 }
             }
             
