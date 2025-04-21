@@ -598,16 +598,16 @@
             return worldChunks.get(key);
         }
         
-        // Initialize arm segments
+        // Initialize arm segments with a more natural starting position
         function initializeArm() {
             segments = [];
             const segmentLength = totalLength / segmentCount;
             
-            // Start with a straight arm pointing right
+            // Start with a straight arm pointing downward (more natural for most games)
             for (let i = 0; i <= segmentCount; i++) {
                 segments.push({
                     x: player.x,
-                    y: player.y - i * segmentLength
+                    y: player.y + i * segmentLength
                 });
             }
         }
@@ -670,37 +670,37 @@
             reachIndicator.style.height = diameter + 'px';
         }
         
-        // Calculate the effective reach distance accounting for joint constraints
+        // Improved function to calculate the effective reach distance
         function calculateEffectiveReach() {
             // For a single segment or no joint constraints, reach is simply totalLength
             if (segmentCount <= 1 || maxConstraintAngle >= 180) return totalLength;
             
             // For multi-segmented arms with constraints, we need a more accurate calculation
             
-            // More severe angle constraints dramatically reduce effective reach
+            // Base reduction factor based on angle constraints
             let angleReductionFactor;
             if (maxConstraintAngle <= 30) {
-                // Very tight constraints significantly reduce reach
-                angleReductionFactor = 0.5;
+                angleReductionFactor = 0.45; // Tighter constraints = less reach
             } else if (maxConstraintAngle <= 60) {
-                angleReductionFactor = 0.65;
+                angleReductionFactor = 0.6;
             } else if (maxConstraintAngle <= 90) {
-                angleReductionFactor = 0.75;
+                angleReductionFactor = 0.7;
             } else if (maxConstraintAngle <= 120) {
-                angleReductionFactor = 0.85;
+                angleReductionFactor = 0.8;
             } else if (maxConstraintAngle <= 150) {
-                angleReductionFactor = 0.92;
+                angleReductionFactor = 0.9;
             } else {
-                angleReductionFactor = 0.98;
+                angleReductionFactor = 0.95;
             }
             
-            // More segments means more points where the arm can bend back on itself
-            // The impact increases exponentially with more segments
-            const segmentReductionFactor = Math.pow(0.85, segmentCount - 1);
+            // More segments means more potential for folding back
+            const segmentReductionFactor = Math.pow(0.9, segmentCount - 1);
             
-            // For many segments with tight constraints, apply an additional correction
+            // Additional reduction for extreme cases
             let additionalReduction = 1.0;
             if (segmentCount >= 4 && maxConstraintAngle <= 90) {
+                additionalReduction = 0.85;
+            } else if (segmentCount >= 6) {
                 additionalReduction = 0.9;
             }
             
@@ -761,7 +761,7 @@
             }
         }
         
-        // Update position based on mouse movement
+        // Update position based on mouse movement - improved to better handle reaching
         function updatePosition(e) {
             if (!isPointerLocked || !gameStarted) return;
             
@@ -795,7 +795,7 @@
             armReachingTarget = true;
         }
         
-        // Hide tutorial and start game
+        // Start game button click handler
         startButton.addEventListener('click', () => {
             tutorial.classList.add('hidden');
             gameStarted = true;
@@ -812,7 +812,7 @@
             updateReachIndicator();
         });
 
-        // Modified canvas click handler to work with pointer lock
+        // Canvas click handler
         canvas.addEventListener('click', (e) => {
             if (!gameStarted) return;
             
@@ -877,7 +877,7 @@
             return Math.acos(clampedCosTheta) * (180 / Math.PI); // Convert to degrees
         }
 
-        // Apply constraints to a joint
+        // Improved constraint application function
         function applyConstraint(p1, p2, p3, maxAngle) {
             const currentAngle = angleBetween(p1, p2, p3);
             
@@ -886,23 +886,40 @@
                 const dir1 = direction(p2, p1);
                 const dir3 = direction(p2, p3);
                 
-                // Calculate the rotation axis (perpendicular to the plane)
-                const cross = {z: dir1.x * dir3.y - dir1.y * dir3.x};
+                // Calculate the angle directly
+                const targetAngleRad = maxAngle * (Math.PI / 180);
                 
-                // Determine rotation direction based on the cross product
-                const rotationDirection = cross.z < 0 ? 1 : -1;
+                // Determine rotation direction
+                // We need to check which way to rotate
+                const cross = dir1.x * dir3.y - dir1.y * dir3.x;
+                const rotationDirection = cross < 0 ? 1 : -1;
                 
-                // Calculate the angle to rotate
-                const angleToRotate = (currentAngle - maxAngle) * rotationDirection * (Math.PI / 180);
+                // Calculate the amount we need to rotate
+                const currentAngleRad = currentAngle * (Math.PI / 180);
+                const angleToRotate = (currentAngleRad - targetAngleRad) * rotationDirection;
+                
+                // Get the distance from p2 to p3 (need to maintain segment length)
+                const dist = distance(p2, p3);
                 
                 // Rotate p3 around p2
-                const dx = p3.x - p2.x;
-                const dy = p3.y - p2.y;
                 const cos = Math.cos(angleToRotate);
                 const sin = Math.sin(angleToRotate);
                 
-                p3.x = p2.x + dx * cos - dy * sin;
-                p3.y = p2.y + dx * sin + dy * cos;
+                // Calculate new position after rotation
+                const dx = p3.x - p2.x;
+                const dy = p3.y - p2.y;
+                
+                // Apply rotation
+                p3.x = p2.x + (dx * cos - dy * sin);
+                p3.y = p2.y + (dx * sin + dy * cos);
+                
+                // Ensure the length is maintained (can drift due to floating point errors)
+                const newDist = distance(p2, p3);
+                if (Math.abs(newDist - dist) > 0.001) {
+                    const scale = dist / newDist;
+                    p3.x = p2.x + (p3.x - p2.x) * scale;
+                    p3.y = p2.y + (p3.y - p2.y) * scale;
+                }
                 
                 return true; // Constraint was applied
             }
@@ -910,7 +927,7 @@
             return false; // No constraint needed
         }
 
-        // FABRIK algorithm implementation
+        // Improved FABRIK algorithm implementation for more accurate IK
         function fabrik(target) {
             if (segments.length < 2) return false;
             
@@ -938,11 +955,39 @@
                     segments[i+1].y = segments[0].y + dir.y * currentDist;
                 }
                 
+                // Apply constraints in even the unreachable case
+                if (maxConstraintAngle < 180) {
+                    let constraintApplied = false;
+                    do {
+                        constraintApplied = false;
+                        for (let i = 1; i < segments.length - 1; i++) {
+                            const wasApplied = applyConstraint(
+                                segments[i-1], 
+                                segments[i], 
+                                segments[i+1], 
+                                maxConstraintAngle
+                            );
+                            constraintApplied = constraintApplied || wasApplied;
+                        }
+                    
+                        // If constraints were applied, rebuild arm to maintain segment lengths
+                        if (constraintApplied) {
+                            for (let i = 0; i < segments.length - 1; i++) {
+                                const dir = direction(segments[i], segments[i+1]);
+                                const length = lengths[i];
+                                segments[i+1].x = segments[i].x + dir.x * length;
+                                segments[i+1].y = segments[i].y + dir.y * length;
+                            }
+                        }
+                    } while (constraintApplied);
+                }
+                
                 return true; // We did our best with an unreachable target
             }
             
             // Start FABRIK iterations
-            for (let iteration = 0; iteration < 10; iteration++) {
+            const MAX_ITERATIONS = 15; // Increase iterations for more accurate results
+            for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
                 // --- Forward Reaching ---
                 // Set end effector to target
                 segments[segments.length - 1].x = target.x;
@@ -967,27 +1012,31 @@
                     segments[i+1].y = segments[i].y + dir.y * lengths[i];
                 }
                 
-                // Apply joint angle constraints
+                // Apply joint angle constraints - multiple passes to ensure all constraints are met
                 let constraintApplied = false;
                 if (maxConstraintAngle < 180) {
-                    for (let i = 1; i < segments.length - 1; i++) {
-                        constraintApplied = applyConstraint(
-                            segments[i-1], 
-                            segments[i], 
-                            segments[i+1], 
-                            maxConstraintAngle
-                        ) || constraintApplied;
-                    }
-                    
-                    // If constraints were applied, we need to rebuild the arm
-                    if (constraintApplied) {
-                        // Forward pass after constraint application
+                    do {
+                        constraintApplied = false;
                         for (let i = 1; i < segments.length - 1; i++) {
-                            const dir = direction(segments[i], segments[i+1]);
-                            segments[i+1].x = segments[i].x + dir.x * lengths[i];
-                            segments[i+1].y = segments[i].y + dir.y * lengths[i];
+                            const wasApplied = applyConstraint(
+                                segments[i-1], 
+                                segments[i], 
+                                segments[i+1], 
+                                maxConstraintAngle
+                            );
+                            constraintApplied = constraintApplied || wasApplied;
                         }
-                    }
+                    
+                        // If constraints were applied, rebuild arm to maintain segment lengths
+                        if (constraintApplied) {
+                            for (let i = 0; i < segments.length - 1; i++) {
+                                const dir = direction(segments[i], segments[i+1]);
+                                const length = lengths[i];
+                                segments[i+1].x = segments[i].x + dir.x * length;
+                                segments[i+1].y = segments[i].y + dir.y * length;
+                            }
+                        }
+                    } while (constraintApplied);
                 }
                 
                 // Check if end effector is close enough to target
@@ -1000,7 +1049,7 @@
             return true;
         }
         
-        // Update player movement
+        // Improved player movement handling that keeps arm position in sync
         function updatePlayerMovement() {
             if (player.isMoving && player.targetX !== null && player.targetY !== null) {
                 const dir = direction(
@@ -1019,19 +1068,36 @@
                     player.targetX = null;
                     player.targetY = null;
                 } else {
+                    // Store old positions to calculate offset
+                    const oldPlayerX = player.x;
+                    const oldPlayerY = player.y;
+                    
                     // Move player towards target
                     player.x += dir.x * moveSpeed;
                     player.y += dir.y * moveSpeed;
+                    
+                    // Calculate how much the player moved
+                    const playerDeltaX = player.x - oldPlayerX;
+                    const playerDeltaY = player.y - oldPlayerY;
                     
                     // Update camera to follow player
                     camera.x = player.x - canvas.width / 2;
                     camera.y = player.y - canvas.height / 2;
                     
+                    // If arm target exists, move it along with player to maintain relative position
+                    if (armTargetX !== null && armTargetY !== null) {
+                        armTargetX += playerDeltaX;
+                        armTargetY += playerDeltaY;
+                        
+                        // Update the target point immediately to prevent lag
+                        targetPoint.x += playerDeltaX;
+                        targetPoint.y += playerDeltaY;
+                    }
+                    
                     // Update reach indicator position after player movement
                     updateReachIndicator();
                     
                     // If pointer is locked, also update the cursor position
-                    // to keep it relative to the player
                     if (isPointerLocked && armTargetX !== null && armTargetY !== null) {
                         // Calculate new screen position for cursor
                         const screenX = armTargetX - camera.x;
@@ -1041,14 +1107,14 @@
                 }
             }
             
-            // Update arm target position gradually
+            // Update arm target position gradually but ensure it stays within reach
             updateArmTarget();
         }
         
-        // Update the arm's target position with realistic movement speed
+        // Improved arm target update to ensure smooth, accurate movement
         function updateArmTarget() {
             if (armTargetX === null || armTargetY === null) {
-                // If there's no arm target, the target is the player
+                // If there's no arm target, reset to player position
                 targetPoint.x = player.x;
                 targetPoint.y = player.y;
                 return;
@@ -1066,8 +1132,24 @@
             
             // Otherwise, move the arm target towards the desired target at a limited speed
             const dir = direction(targetPoint, { x: armTargetX, y: armTargetY });
+            
+            // Move target point toward arm target
             targetPoint.x += dir.x * armMovementSpeed;
             targetPoint.y += dir.y * armMovementSpeed;
+            
+            // Double check that targetPoint is still within reach of player
+            const distToPlayer = distance(targetPoint, { x: player.x, y: player.y });
+            const maxReach = calculateEffectiveReach();
+            
+            if (distToPlayer > maxReach) {
+                // Pull back to maximum reach
+                const dirFromPlayer = direction(
+                    { x: player.x, y: player.y },
+                    targetPoint
+                );
+                targetPoint.x = player.x + dirFromPlayer.x * maxReach;
+                targetPoint.y = player.y + dirFromPlayer.y * maxReach;
+            }
         }
         
         // Check for item collection
