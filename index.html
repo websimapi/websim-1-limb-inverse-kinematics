@@ -672,28 +672,39 @@
         
         // Calculate the effective reach distance accounting for joint constraints
         function calculateEffectiveReach() {
-            if (segmentCount <= 1) return totalLength;
+            // For a single segment or no joint constraints, reach is simply totalLength
+            if (segmentCount <= 1 || maxConstraintAngle >= 180) return totalLength;
             
-            // For a straight arm, reach is totalLength
-            if (maxConstraintAngle >= 180) return totalLength;
+            // For multi-segmented arms with constraints, we need a more accurate calculation
             
-            // Calculate effective reach considering joint constraints
-            // As constraint angle decreases, the effective reach decreases
-            // This is an approximation that provides a more realistic reach limitation
+            // More severe angle constraints dramatically reduce effective reach
+            let angleReductionFactor;
+            if (maxConstraintAngle <= 30) {
+                // Very tight constraints significantly reduce reach
+                angleReductionFactor = 0.5;
+            } else if (maxConstraintAngle <= 60) {
+                angleReductionFactor = 0.65;
+            } else if (maxConstraintAngle <= 90) {
+                angleReductionFactor = 0.75;
+            } else if (maxConstraintAngle <= 120) {
+                angleReductionFactor = 0.85;
+            } else if (maxConstraintAngle <= 150) {
+                angleReductionFactor = 0.92;
+            } else {
+                angleReductionFactor = 0.98;
+            }
             
-            // Convert constraint angle to radians
-            const constraintRad = maxConstraintAngle * (Math.PI / 180);
+            // More segments means more points where the arm can bend back on itself
+            // The impact increases exponentially with more segments
+            const segmentReductionFactor = Math.pow(0.85, segmentCount - 1);
             
-            // Factor based on constraint angle - ranges from ~0.5 (very constrained) to 1.0 (unconstrained)
-            // This calculation ensures reach gets shorter as constraints get tighter
-            let constraintFactor = Math.sin(constraintRad / 2) / Math.sin(Math.PI / 2);
-            constraintFactor = Math.max(0.5, constraintFactor); // Minimum factor of 0.5
+            // For many segments with tight constraints, apply an additional correction
+            let additionalReduction = 1.0;
+            if (segmentCount >= 4 && maxConstraintAngle <= 90) {
+                additionalReduction = 0.9;
+            }
             
-            // Apply a stronger reduction as segment count increases
-            // More segments with constraints bend more, reducing effective reach
-            const segmentFactor = Math.pow(0.95, segmentCount - 1);
-            
-            return totalLength * constraintFactor * segmentFactor;
+            return totalLength * angleReductionFactor * segmentReductionFactor * additionalReduction;
         }
         
         // Clamp the mouse position to the maximum reach of the arm
