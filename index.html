@@ -257,7 +257,8 @@
         // Camera variables
         let camera = {
             x: 0,
-            y: 0
+            y: 0,
+            focusOnEndEffector: true // New flag to control camera focus
         };
         
         // Arm segments
@@ -830,8 +831,35 @@
             }
             
             // Convert screen coordinates to world coordinates
-            player.targetX = screenX + camera.x;
-            player.targetY = screenY + camera.y;
+            const worldX = screenX + camera.x;
+            const worldY = screenY + camera.y;
+            
+            // Calculate maximum allowed distance for movement target
+            const effectiveReach = calculateEffectiveReach();
+            const maxMovementDistance = effectiveReach * 2; // Allow movement within twice the arm's reach
+            
+            // Calculate distance from player to click point
+            const clickDist = distance(
+                { x: player.x, y: player.y },
+                { x: worldX, y: worldY }
+            );
+            
+            // If the click is extremely far, limit it to a reasonable distance
+            if (clickDist > maxMovementDistance) {
+                const dir = direction(
+                    { x: player.x, y: player.y },
+                    { x: worldX, y: worldY }
+                );
+                
+                // Set target to a limited distance in the clicked direction
+                player.targetX = player.x + dir.x * maxMovementDistance;
+                player.targetY = player.y + dir.y * maxMovementDistance;
+            } else {
+                // Normal case - click is within reasonable range
+                player.targetX = worldX;
+                player.targetY = worldY;
+            }
+            
             player.isMoving = true;
         });
 
@@ -1080,10 +1108,6 @@
                     const playerDeltaX = player.x - oldPlayerX;
                     const playerDeltaY = player.y - oldPlayerY;
                     
-                    // Update camera to follow player
-                    camera.x = player.x - canvas.width / 2;
-                    camera.y = player.y - canvas.height / 2;
-                    
                     // If arm target exists, move it along with player to maintain relative position
                     if (armTargetX !== null && armTargetY !== null) {
                         armTargetX += playerDeltaX;
@@ -1109,6 +1133,23 @@
             
             // Update arm target position gradually but ensure it stays within reach
             updateArmTarget();
+            
+            // Update the camera position to focus on the appropriate element
+            updateCameraPosition();
+        }
+        
+        // New function to handle camera positioning
+        function updateCameraPosition() {
+            if (camera.focusOnEndEffector && segments.length > 0) {
+                // Focus camera on end effector (last segment)
+                const endEffector = segments[segments.length - 1];
+                camera.x = endEffector.x - canvas.width / 2;
+                camera.y = endEffector.y - canvas.height / 2;
+            } else {
+                // Focus camera on player base
+                camera.x = player.x - canvas.width / 2;
+                camera.y = player.y - canvas.height / 2;
+            }
         }
         
         // Improved arm target update to ensure smooth, accurate movement
@@ -1302,7 +1343,7 @@
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
             if (gameStarted) {
-                // Update player movement
+                // Update player movement (which now also updates camera)
                 updatePlayerMovement();
                 
                 // Check for item collection
