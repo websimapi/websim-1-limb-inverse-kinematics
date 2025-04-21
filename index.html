@@ -912,9 +912,28 @@
         function fabrik(target) {
             if (segments.length < 2) return false;
             
+            // Ensure target has finite coordinates
+            if (!isFinite(target.x) || !isFinite(target.y)) {
+                console.warn("Non-finite target coordinates provided to FABRIK", target);
+                return false;
+            }
+            
             // Get segment lengths
             const lengths = [];
             for (let i = 0; i < segments.length - 1; i++) {
+                // Ensure segments have finite coordinates
+                if (!isFinite(segments[i].x) || !isFinite(segments[i].y) || 
+                    !isFinite(segments[i+1].x) || !isFinite(segments[i+1].y)) {
+                    console.warn("Non-finite segment coordinates detected", i, segments[i], segments[i+1]);
+                    // Reset the problematic segment to a safe value
+                    if (!isFinite(segments[i].x) || !isFinite(segments[i].y)) {
+                        segments[i] = { x: player.x, y: player.y };
+                    }
+                    if (!isFinite(segments[i+1].x) || !isFinite(segments[i+1].y)) {
+                        segments[i+1] = { x: player.x, y: player.y };
+                    }
+                }
+                
                 lengths.push(distance(segments[i], segments[i+1]));
             }
             
@@ -1241,6 +1260,13 @@
                     y: segments[i+1].y - camera.y
                 };
                 
+                // Check for non-finite values before creating the gradient
+                if (!isFinite(screenStart.x) || !isFinite(screenStart.y) || 
+                    !isFinite(screenEnd.x) || !isFinite(screenEnd.y)) {
+                    console.warn("Non-finite coordinate detected in arm segment", i);
+                    continue; // Skip drawing this segment
+                }
+                
                 // Create gradient for segment
                 const segmentGradient = ctx.createLinearGradient(
                     screenStart.x, screenStart.y, screenEnd.x, screenEnd.y
@@ -1273,19 +1299,25 @@
             }
             
             // Draw end effector (last joint)
-            const lastJoint = segments[segments.length - 1];
-            const screenLastJoint = {
-                x: lastJoint.x - camera.x,
-                y: lastJoint.y - camera.y
-            };
-            
-            ctx.beginPath();
-            ctx.arc(screenLastJoint.x, screenLastJoint.y, 6, 0, Math.PI * 2);
-            ctx.fillStyle = `hsl(${210 - ((segments.length-1) * 12)}, 70%, 40%)`;
-            ctx.fill();
-            ctx.strokeStyle = '#aaa';
-            ctx.lineWidth = 1;
-            ctx.stroke();
+            if (segments.length > 0) {
+                const lastJoint = segments[segments.length - 1];
+                
+                // Check if coordinates are valid
+                if (isFinite(lastJoint.x) && isFinite(lastJoint.y)) {
+                    const screenLastJoint = {
+                        x: lastJoint.x - camera.x,
+                        y: lastJoint.y - camera.y
+                    };
+                    
+                    ctx.beginPath();
+                    ctx.arc(screenLastJoint.x, screenLastJoint.y, 6, 0, Math.PI * 2);
+                    ctx.fillStyle = `hsl(${210 - ((segments.length-1) * 12)}, 70%, 40%)`;
+                    ctx.fill();
+                    ctx.strokeStyle = '#aaa';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+            }
             
             // Draw target indicator if moving
             if (player.isMoving && player.targetX !== null && player.targetY !== null) {
