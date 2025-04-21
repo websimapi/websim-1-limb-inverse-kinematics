@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>1-Limb Inverse Kinematics</title>
+    <title>FABRIK Inverse Kinematics Demo</title>
     <style>
         body {
             margin: 0;
@@ -20,20 +20,136 @@
         
         .container {
             text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
         
         canvas {
             background-color: #333;
             border: 1px solid #555;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            margin-bottom: 20px;
+        }
+        
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+            margin-bottom: 20px;
+            width: 800px;
+        }
+        
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        
+        .control-group label {
+            margin-bottom: 5px;
+        }
+        
+        button {
+            background: #4a69bd;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        
+        button:hover {
+            background: #6a89cc;
+        }
+        
+        input[type="range"] {
+            width: 150px;
+        }
+        
+        .toggle-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .legend {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .legend-color {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Inverse Kinematics Demo</h1>
+        <h1>FABRIK Inverse Kinematics Demo</h1>
         <p>Move your cursor to control the arm's end point</p>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="segmentCount">Number of segments: <span id="segmentCountValue">3</span></label>
+                <input type="range" id="segmentCount" min="2" max="10" value="3">
+            </div>
+            
+            <div class="control-group">
+                <label for="totalLength">Total arm length: <span id="totalLengthValue">300</span></label>
+                <input type="range" id="totalLength" min="100" max="500" value="300">
+            </div>
+            
+            <div class="control-group">
+                <label for="iterations">FABRIK iterations: <span id="iterationsValue">10</span></label>
+                <input type="range" id="iterations" min="1" max="20" value="10">
+            </div>
+            
+            <div class="control-group">
+                <label for="constraintAngle">Max joint angle (degrees): <span id="constraintAngleValue">120</span></label>
+                <input type="range" id="constraintAngle" min="0" max="180" value="120">
+            </div>
+            
+            <div class="toggle-group">
+                <label for="showConstraints">Show constraints:</label>
+                <input type="checkbox" id="showConstraints" checked>
+            </div>
+            
+            <div class="toggle-group">
+                <label for="showIterations">Show iterations:</label>
+                <input type="checkbox" id="showIterations" checked>
+            </div>
+        </div>
+        
         <canvas id="ikCanvas" width="800" height="500"></canvas>
+        
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: rgba(255, 100, 100, 0.7);"></div>
+                <span>Target</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: rgba(100, 255, 100, 0.3);"></div>
+                <span>Constraint zones</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: rgba(100, 100, 255, 0.3);"></div>
+                <span>Iteration steps</span>
+            </div>
+        </div>
     </div>
     
     <script>
@@ -41,15 +157,82 @@
         const canvas = document.getElementById('ikCanvas');
         const ctx = canvas.getContext('2d');
 
-        // Arm configuration
+        // UI elements
+        const segmentCountInput = document.getElementById('segmentCount');
+        const segmentCountValue = document.getElementById('segmentCountValue');
+        const totalLengthInput = document.getElementById('totalLength');
+        const totalLengthValue = document.getElementById('totalLengthValue');
+        const iterationsInput = document.getElementById('iterations');
+        const iterationsValue = document.getElementById('iterationsValue');
+        const constraintAngleInput = document.getElementById('constraintAngle');
+        const constraintAngleValue = document.getElementById('constraintAngleValue');
+        const showConstraintsInput = document.getElementById('showConstraints');
+        const showIterationsInput = document.getElementById('showIterations');
+
+        // Configuration variables
+        let segmentCount = parseInt(segmentCountInput.value);
+        let totalLength = parseInt(totalLengthInput.value);
+        let iterationCount = parseInt(iterationsInput.value);
+        let maxConstraintAngle = parseInt(constraintAngleInput.value);
+        let showConstraints = showConstraintsInput.checked;
+        let showIterations = showIterationsInput.checked;
+
+        // Base position (center of the canvas)
         const baseX = canvas.width / 2;
         const baseY = canvas.height / 2;
-        const upperArmLength = 150;
-        const forearmLength = 120;
 
         // Target position (will be updated by mouse movement)
         let targetX = baseX + 100;
         let targetY = baseY - 50;
+
+        // Arm segments
+        let segments = [];
+        let iterationHistory = [];
+
+        // Initialize arm segments
+        function initializeArm() {
+            segments = [];
+            const segmentLength = totalLength / segmentCount;
+            
+            // Start with a straight arm pointing right
+            for (let i = 0; i <= segmentCount; i++) {
+                segments.push({
+                    x: baseX + i * segmentLength,
+                    y: baseY
+                });
+            }
+        }
+
+        // Event listeners for UI controls
+        segmentCountInput.addEventListener('input', () => {
+            segmentCount = parseInt(segmentCountInput.value);
+            segmentCountValue.textContent = segmentCount;
+            initializeArm();
+        });
+
+        totalLengthInput.addEventListener('input', () => {
+            totalLength = parseInt(totalLengthInput.value);
+            totalLengthValue.textContent = totalLength;
+            initializeArm();
+        });
+
+        iterationsInput.addEventListener('input', () => {
+            iterationCount = parseInt(iterationsInput.value);
+            iterationsValue.textContent = iterationCount;
+        });
+
+        constraintAngleInput.addEventListener('input', () => {
+            maxConstraintAngle = parseInt(constraintAngleInput.value);
+            constraintAngleValue.textContent = maxConstraintAngle;
+        });
+
+        showConstraintsInput.addEventListener('change', () => {
+            showConstraints = showConstraintsInput.checked;
+        });
+
+        showIterationsInput.addEventListener('change', () => {
+            showIterations = showIterationsInput.checked;
+        });
 
         // Handle mouse movement
         canvas.addEventListener('mousemove', (e) => {
@@ -59,67 +242,224 @@
             targetY = e.clientY - rect.top;
         });
 
-        // Calculate arm angles using inverse kinematics
-        function calculateIK(targetX, targetY) {
-            // Calculate distance from base to target
-            const dx = targetX - baseX;
-            const dy = targetY - baseY;
-            const targetDistance = Math.sqrt(dx * dx + dy * dy);
-            
-            // Clamp target distance to prevent impossible positions
-            const clampedDistance = Math.min(
-                targetDistance, 
-                upperArmLength + forearmLength - 1
-            );
-            
-            // Use law of cosines to find elbow angle
-            // c² = a² + b² - 2ab·cosC
-            // where a = upperArmLength, b = forearmLength, c = clampedDistance
-            const cosElbow = (
-                Math.pow(upperArmLength, 2) + 
-                Math.pow(forearmLength, 2) - 
-                Math.pow(clampedDistance, 2)
-            ) / (2 * upperArmLength * forearmLength);
-            
-            // Prevent domain errors with acos
-            const clampedCosElbow = Math.max(-1, Math.min(1, cosElbow));
-            const elbowAngle = Math.acos(clampedCosElbow);
-            
-            // Calculate shoulder angle
-            const targetAngle = Math.atan2(dy, dx);
-            
-            // Find the angle between upper arm and the line to target
-            const cosShoulderOffset = (
-                Math.pow(upperArmLength, 2) + 
-                Math.pow(clampedDistance, 2) - 
-                Math.pow(forearmLength, 2)
-            ) / (2 * upperArmLength * clampedDistance);
-            
-            // Prevent domain errors
-            const clampedCosShoulderOffset = Math.max(-1, Math.min(1, cosShoulderOffset));
-            const shoulderOffset = Math.acos(clampedCosShoulderOffset);
-            
-            // Final shoulder angle
-            const shoulderAngle = targetAngle - shoulderOffset;
+        // Calculate distance between two points
+        function distance(p1, p2) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
 
+        // Calculate the unit vector from p1 to p2
+        function direction(p1, p2) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
             return {
-                shoulder: shoulderAngle,
-                elbow: Math.PI - elbowAngle // Convert to external angle
+                x: dx / dist,
+                y: dy / dist
             };
         }
 
-        // Draw the arm
-        function drawArm(shoulderAngle, elbowAngle) {
-            // Calculate joint positions
-            const elbowX = baseX + Math.cos(shoulderAngle) * upperArmLength;
-            const elbowY = baseY + Math.sin(shoulderAngle) * upperArmLength;
+        // Calculate the angle between three points (with p2 as the vertex)
+        function angleBetween(p1, p2, p3) {
+            const a = {x: p1.x - p2.x, y: p1.y - p2.y};
+            const b = {x: p3.x - p2.x, y: p3.y - p2.y};
             
-            const wristAngle = shoulderAngle + elbowAngle;
-            const wristX = elbowX + Math.cos(wristAngle) * forearmLength;
-            const wristY = elbowY + Math.sin(wristAngle) * forearmLength;
+            const dotProduct = a.x * b.x + a.y * b.y;
+            const magnitudeA = Math.sqrt(a.x * a.x + a.y * a.y);
+            const magnitudeB = Math.sqrt(b.x * b.x + b.y * b.y);
             
+            // Ensure we don't get NaN from division by zero
+            if (magnitudeA === 0 || magnitudeB === 0) return 0;
+            
+            const cosTheta = dotProduct / (magnitudeA * magnitudeB);
+            
+            // Clamp to avoid floating point errors
+            const clampedCosTheta = Math.max(-1, Math.min(1, cosTheta));
+            
+            return Math.acos(clampedCosTheta) * (180 / Math.PI); // Convert to degrees
+        }
+
+        // Apply constraints to a joint
+        function applyConstraint(p1, p2, p3, maxAngle) {
+            const currentAngle = angleBetween(p1, p2, p3);
+            
+            if (currentAngle > maxAngle) {
+                // Calculate the direction vectors
+                const dir1 = direction(p2, p1);
+                const dir3 = direction(p2, p3);
+                
+                // Calculate the rotation axis (perpendicular to the plane)
+                const cross = {z: dir1.x * dir3.y - dir1.y * dir3.x};
+                
+                // Determine rotation direction based on the cross product
+                const rotationDirection = cross.z < 0 ? 1 : -1;
+                
+                // Calculate the angle to rotate
+                const angleToRotate = (currentAngle - maxAngle) * rotationDirection * (Math.PI / 180);
+                
+                // Rotate p3 around p2
+                const dx = p3.x - p2.x;
+                const dy = p3.y - p2.y;
+                const cos = Math.cos(angleToRotate);
+                const sin = Math.sin(angleToRotate);
+                
+                p3.x = p2.x + dx * cos - dy * sin;
+                p3.y = p2.y + dx * sin + dy * cos;
+                
+                return true; // Constraint was applied
+            }
+            
+            return false; // No constraint needed
+        }
+
+        // FABRIK algorithm implementation
+        function fabrik(target) {
+            if (segments.length < 2) return false;
+            
+            // Save the initial position for iteration history
+            const initialPositions = segments.map(p => ({x: p.x, y: p.y}));
+            iterationHistory = [initialPositions];
+            
+            // Get segment lengths
+            const lengths = [];
+            for (let i = 0; i < segments.length - 1; i++) {
+                lengths.push(distance(segments[i], segments[i+1]));
+            }
+            
+            // Get the total arm length
+            const armLength = lengths.reduce((sum, length) => sum + length, 0);
+            
+            // Check if target is reachable
+            const distToTarget = distance(segments[0], target);
+            
+            // If target is too far, extend arm in target direction
+            if (distToTarget > armLength) {
+                const dir = direction(segments[0], target);
+                
+                // Place all segments along the direction to target
+                let currentDist = 0;
+                for (let i = 0; i < segments.length - 1; i++) {
+                    currentDist += lengths[i];
+                    segments[i+1].x = segments[0].x + dir.x * currentDist;
+                    segments[i+1].y = segments[0].y + dir.y * currentDist;
+                }
+                
+                // Save this stage for history
+                iterationHistory.push(segments.map(p => ({x: p.x, y: p.y})));
+                return true; // We did our best with an unreachable target
+            }
+            
+            // Start FABRIK iterations
+            for (let iteration = 0; iteration < iterationCount; iteration++) {
+                // --- Forward Reaching ---
+                // Set end effector to target
+                segments[segments.length - 1].x = target.x;
+                segments[segments.length - 1].y = target.y;
+                
+                // Work backwards from target to base
+                for (let i = segments.length - 2; i >= 0; i--) {
+                    const dir = direction(segments[i+1], segments[i]);
+                    segments[i].x = segments[i+1].x + dir.x * lengths[i];
+                    segments[i].y = segments[i+1].y + dir.y * lengths[i];
+                }
+                
+                // --- Backward Reaching ---
+                // Restore the base position
+                segments[0].x = baseX;
+                segments[0].y = baseY;
+                
+                // Work forwards from base to end effector
+                for (let i = 0; i < segments.length - 1; i++) {
+                    const dir = direction(segments[i], segments[i+1]);
+                    segments[i+1].x = segments[i].x + dir.x * lengths[i];
+                    segments[i+1].y = segments[i].y + dir.y * lengths[i];
+                }
+                
+                // Apply joint angle constraints
+                let constraintApplied = false;
+                if (maxConstraintAngle < 180) {
+                    for (let i = 1; i < segments.length - 1; i++) {
+                        constraintApplied = applyConstraint(
+                            segments[i-1], 
+                            segments[i], 
+                            segments[i+1], 
+                            maxConstraintAngle
+                        ) || constraintApplied;
+                    }
+                    
+                    // If constraints were applied, we need to rebuild the arm
+                    if (constraintApplied) {
+                        // Forward pass after constraint application
+                        for (let i = 1; i < segments.length - 1; i++) {
+                            const dir = direction(segments[i], segments[i+1]);
+                            segments[i+1].x = segments[i].x + dir.x * lengths[i];
+                            segments[i+1].y = segments[i].y + dir.y * lengths[i];
+                        }
+                    }
+                }
+                
+                // Save this iteration for visualization
+                iterationHistory.push(segments.map(p => ({x: p.x, y: p.y})));
+                
+                // Check if end effector is close enough to target
+                const errorDistance = distance(segments[segments.length - 1], target);
+                if (errorDistance < 0.5) {
+                    break;
+                }
+            }
+            
+            return true;
+        }
+
+        // Draw the arm and visualization elements
+        function draw() {
             // Clear canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw iteration history if enabled
+            if (showIterations && iterationHistory.length > 0) {
+                // Skip the first element (initial position) and last (final position)
+                for (let i = 1; i < iterationHistory.length - 1; i++) {
+                    const opacity = 0.3 * (i / (iterationHistory.length - 1));
+                    
+                    // Draw this iteration's arm position
+                    const iteration = iterationHistory[i];
+                    for (let j = 0; j < iteration.length - 1; j++) {
+                        ctx.beginPath();
+                        ctx.moveTo(iteration[j].x, iteration[j].y);
+                        ctx.lineTo(iteration[j+1].x, iteration[j+1].y);
+                        ctx.strokeStyle = `rgba(100, 100, 255, ${opacity})`;
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }
+                }
+            }
+            
+            // Draw constraint visualization if enabled
+            if (showConstraints && maxConstraintAngle < 180) {
+                for (let i = 1; i < segments.length - 1; i++) {
+                    const p1 = segments[i-1];
+                    const p2 = segments[i];
+                    const p3 = segments[i+1];
+                    
+                    // Draw constraint cone
+                    const angle1 = Math.atan2(p1.y - p2.y, p1.x - p2.x);
+                    const halfConeAngle = (maxConstraintAngle * Math.PI) / 180 / 2;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(p2.x, p2.y);
+                    ctx.arc(
+                        p2.x, p2.y, 
+                        30, // Radius for visualization
+                        angle1 - halfConeAngle, 
+                        angle1 + halfConeAngle
+                    );
+                    ctx.closePath();
+                    ctx.fillStyle = 'rgba(100, 255, 100, 0.3)';
+                    ctx.fill();
+                }
+            }
             
             // Draw target
             ctx.beginPath();
@@ -131,8 +471,9 @@
             ctx.stroke();
             
             // Draw line to target (to show difference between target and actual end position)
+            const endEffector = segments[segments.length - 1];
             ctx.beginPath();
-            ctx.moveTo(wristX, wristY);
+            ctx.moveTo(endEffector.x, endEffector.y);
             ctx.lineTo(targetX, targetY);
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
             ctx.lineWidth = 1;
@@ -142,58 +483,54 @@
             
             // Draw base
             ctx.beginPath();
-            ctx.arc(baseX, baseY, 15, 0, Math.PI * 2);
+            ctx.arc(segments[0].x, segments[0].y, 15, 0, Math.PI * 2);
             ctx.fillStyle = '#888';
             ctx.fill();
             ctx.strokeStyle = '#aaa';
             ctx.lineWidth = 2;
             ctx.stroke();
             
-            // Create gradient for upper arm
-            const upperArmGradient = ctx.createLinearGradient(
-                baseX, baseY, elbowX, elbowY
-            );
-            upperArmGradient.addColorStop(0, '#6a89cc');
-            upperArmGradient.addColorStop(1, '#4a69bd');
+            // Draw the arm segments
+            for (let i = 0; i < segments.length - 1; i++) {
+                const start = segments[i];
+                const end = segments[i+1];
+                
+                // Create gradient for segment
+                const segmentGradient = ctx.createLinearGradient(
+                    start.x, start.y, end.x, end.y
+                );
+                
+                // Gradient colors based on position in the arm
+                const startColor = `hsl(${210 - (i * 12)}, 70%, 50%)`;
+                const endColor = `hsl(${210 - ((i+1) * 12)}, 70%, 45%)`;
+                
+                segmentGradient.addColorStop(0, startColor);
+                segmentGradient.addColorStop(1, endColor);
+                
+                // Draw segment
+                ctx.beginPath();
+                ctx.moveTo(start.x, start.y);
+                ctx.lineTo(end.x, end.y);
+                ctx.lineWidth = 15 - (i * 0.8); // Thinner towards the end
+                ctx.lineCap = 'round';
+                ctx.strokeStyle = segmentGradient;
+                ctx.stroke();
+                
+                // Draw joint at the start of the segment
+                ctx.beginPath();
+                ctx.arc(start.x, start.y, 10 - (i * 0.5), 0, Math.PI * 2);
+                ctx.fillStyle = startColor;
+                ctx.fill();
+                ctx.strokeStyle = '#aaa';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
             
-            // Draw upper arm
+            // Draw end effector (last joint)
+            const lastJoint = segments[segments.length - 1];
             ctx.beginPath();
-            ctx.moveTo(baseX, baseY);
-            ctx.lineTo(elbowX, elbowY);
-            ctx.lineWidth = 15;
-            ctx.lineCap = 'round';
-            ctx.strokeStyle = upperArmGradient;
-            ctx.stroke();
-            
-            // Draw elbow joint
-            ctx.beginPath();
-            ctx.arc(elbowX, elbowY, 10, 0, Math.PI * 2);
-            ctx.fillStyle = '#4a69bd';
-            ctx.fill();
-            ctx.strokeStyle = '#aaa';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            
-            // Create gradient for forearm
-            const forearmGradient = ctx.createLinearGradient(
-                elbowX, elbowY, wristX, wristY
-            );
-            forearmGradient.addColorStop(0, '#4a69bd');
-            forearmGradient.addColorStop(1, '#1e3799');
-            
-            // Draw forearm
-            ctx.beginPath();
-            ctx.moveTo(elbowX, elbowY);
-            ctx.lineTo(wristX, wristY);
-            ctx.lineWidth = 12;
-            ctx.lineCap = 'round';
-            ctx.strokeStyle = forearmGradient;
-            ctx.stroke();
-            
-            // Draw wrist/end effector
-            ctx.beginPath();
-            ctx.arc(wristX, wristY, 8, 0, Math.PI * 2);
-            ctx.fillStyle = '#1e3799';
+            ctx.arc(lastJoint.x, lastJoint.y, 8, 0, Math.PI * 2);
+            ctx.fillStyle = `hsl(${210 - ((segments.length-1) * 12)}, 70%, 40%)`;
             ctx.fill();
             ctx.strokeStyle = '#aaa';
             ctx.lineWidth = 2;
@@ -202,20 +539,20 @@
 
         // Animation loop
         function animate() {
-            // Calculate IK
-            const angles = calculateIK(targetX, targetY);
+            // Apply FABRIK to reach target
+            fabrik({x: targetX, y: targetY});
             
-            // Draw the arm
-            drawArm(angles.shoulder, angles.elbow);
+            // Draw everything
+            draw();
             
             // Schedule the next frame
             requestAnimationFrame(animate);
         }
 
-        // Start animation
+        // Initialize arm and start animation
+        initializeArm();
         animate();
     </script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
-
