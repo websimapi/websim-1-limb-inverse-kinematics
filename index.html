@@ -108,54 +108,44 @@
             display: none;
         }
         
-        /* New styles for interactive objects */
-        .item-tooltip {
+        .crosshair {
             position: absolute;
-            background: rgba(0,0,0,0.7);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 4px;
-            font-size: 12px;
             pointer-events: none;
-            z-index: 1000;
-            transform: translate(-50%, -100%);
-            margin-top: -10px;
+            width: 20px;
+            height: 20px;
+            z-index: 300;
+            transform: translate(-50%, -50%);
         }
         
-        /* Inventory panel */
-        .inventory {
+        .pointer-locked .crosshair {
+            display: block;
+        }
+        
+        .pointer-locked {
+            cursor: none;
+        }
+        
+        .reach-indicator {
             position: absolute;
-            bottom: 10px;
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            z-index: 50;
+        }
+        
+        .locked-message {
+            position: absolute;
+            bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
             background: rgba(0, 0, 0, 0.7);
-            padding: 10px;
+            color: white;
+            padding: 10px 20px;
             border-radius: 5px;
-            display: flex;
-            gap: 10px;
-        }
-        
-        .inventory-slot {
-            width: 40px;
-            height: 40px;
-            background: rgba(255, 255, 255, 0.2);
-            border: 2px solid rgba(255, 255, 255, 0.5);
-            border-radius: 5px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            position: relative;
-        }
-        
-        .inventory-slot.active {
-            border-color: #ffdd00;
-            box-shadow: 0 0 10px #ffdd00;
-        }
-        
-        .inventory-item {
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
+            font-size: 14px;
+            transition: opacity 0.5s;
+            opacity: 0;
         }
     </style>
 </head>
@@ -188,15 +178,6 @@
         <div class="game-ui">
             <div>Chunks explored: <span id="chunksExplored">0</span></div>
             <div>Items collected: <span id="itemsCollected">0</span></div>
-            <div>Current mode: <span id="interactionMode">Reach</span></div>
-        </div>
-        
-        <div class="inventory" id="inventory">
-            <div class="inventory-slot" data-slot="0"></div>
-            <div class="inventory-slot" data-slot="1"></div>
-            <div class="inventory-slot" data-slot="2"></div>
-            <div class="inventory-slot" data-slot="3"></div>
-            <div class="inventory-slot" data-slot="4"></div>
         </div>
         
         <div class="tutorial" id="tutorial">
@@ -204,10 +185,21 @@
             <p>Click anywhere to move your character through the infinite procedurally generated world.</p>
             <p>Explore different biomes, collect items, and discover new areas!</p>
             <p>Your character is represented by an inverse kinematics arm that will reach toward your destination.</p>
-            <p>Use the arm to interact with objects - grab items with a click, drag your body, or use tools.</p>
-            <p>Press 'G' to toggle between reach mode and grab mode.</p>
+            <p><strong>Your mouse will be locked to the game and limited to the arm's maximum reach.</strong></p>
+            <p><small>Press ESC at any time to unlock your mouse.</small></p>
             <button id="startButton">Start Exploring</button>
         </div>
+        
+        <svg class="crosshair" id="mouseCrosshair" style="display: none;">
+            <circle cx="10" cy="10" r="9" fill="none" stroke="white" stroke-width="1.5" />
+            <line x1="10" y1="0" x2="10" y2="5" stroke="white" stroke-width="1.5" />
+            <line x1="10" y1="15" x2="10" y2="20" stroke="white" stroke-width="1.5" />
+            <line x1="0" y1="10" x2="5" y2="10" stroke="white" stroke-width="1.5" />
+            <line x1="15" y1="10" x2="20" y2="10" stroke="white" stroke-width="1.5" />
+        </svg>
+        
+        <div class="reach-indicator" id="reachIndicator"></div>
+        <div class="locked-message" id="lockedMessage">Mouse locked. Press ESC to unlock.</div>
     </div>
     
     <script>
@@ -230,10 +222,11 @@
         const moveSpeedValue = document.getElementById('moveSpeedValue');
         const chunksExploredDisplay = document.getElementById('chunksExplored');
         const itemsCollectedDisplay = document.getElementById('itemsCollected');
-        const interactionModeDisplay = document.getElementById('interactionMode');
         const tutorial = document.getElementById('tutorial');
         const startButton = document.getElementById('startButton');
-        const inventoryElement = document.getElementById('inventory');
+        const mouseCrosshair = document.getElementById('mouseCrosshair');
+        const reachIndicator = document.getElementById('reachIndicator');
+        const lockedMessage = document.getElementById('lockedMessage');
 
         // Configuration variables
         let segmentCount = parseInt(segmentCountInput.value);
@@ -241,16 +234,16 @@
         let maxConstraintAngle = parseInt(constraintAngleInput.value);
         let moveSpeed = parseInt(moveSpeedInput.value);
 
+        // Mouse lock variables
+        let isPointerLocked = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+        
         // Game state
         let chunksExplored = 0;
         let itemsCollected = 0;
         let gameStarted = false;
-        let interactionMode = 'Reach';
-        let grabbedObject = null;
-        let hoverObject = null;
-        let inventoryItems = Array(5).fill(null);
-        let activeSlot = 0;
-
+        
         // World variables
         let worldChunks = new Map(); // Map of chunk coordinates to chunk data
         let player = {
@@ -377,12 +370,7 @@
                             x: random.range(0, CHUNK_SIZE),
                             y: random.range(0, CHUNK_SIZE),
                             size: random.range(5, 15),
-                            collected: false,
-                            interactable: true,
-                            color: this.biome.itemColor,
-                            name: `${this.getBiomeName()} Crystal`,
-                            value: random.intRange(5, 20),
-                            requiresGrab: true // Requires the arm to grab it
+                            collected: false
                         });
                     }
                 }
@@ -397,8 +385,7 @@
                             type: 'tree',
                             x: random.range(0, CHUNK_SIZE),
                             y: random.range(0, CHUNK_SIZE),
-                            size: random.range(10, 25),
-                            collidable: true
+                            size: random.range(10, 25)
                         });
                     }
                 } else if (this.biome === BIOMES.MOUNTAIN) {
@@ -409,10 +396,7 @@
                             type: 'rock',
                             x: random.range(0, CHUNK_SIZE),
                             y: random.range(0, CHUNK_SIZE),
-                            size: random.range(15, 35),
-                            collidable: true,
-                            draggable: random.next() < 0.3, // Some rocks can be dragged
-                            weight: random.range(1, 5)
+                            size: random.range(15, 35)
                         });
                     }
                 } else if (this.biome === BIOMES.DESERT) {
@@ -423,9 +407,7 @@
                             type: 'cactus',
                             x: random.range(0, CHUNK_SIZE),
                             y: random.range(0, CHUNK_SIZE),
-                            size: random.range(8, 20),
-                            collidable: true,
-                            damaging: true // Cacti damage on contact
+                            size: random.range(8, 20)
                         });
                     }
                 } else if (this.biome === BIOMES.WATER) {
@@ -436,37 +418,10 @@
                             type: 'lily',
                             x: random.range(0, CHUNK_SIZE),
                             y: random.range(0, CHUNK_SIZE),
-                            size: random.range(5, 15),
-                            collidable: false
+                            size: random.range(5, 15)
                         });
                     }
                 }
-                
-                // Add interactable objects
-                if (random.next() < 0.3) {
-                    const toolType = ['weapon', 'shovel', 'pickaxe'][random.intRange(0, 2)];
-                    this.features.push({
-                        type: 'tool',
-                        toolType: toolType,
-                        x: random.range(0, CHUNK_SIZE),
-                        y: random.range(0, CHUNK_SIZE),
-                        size: 12,
-                        collidable: false,
-                        interactable: true,
-                        pickupable: true,
-                        name: toolType.charAt(0).toUpperCase() + toolType.slice(1)
-                    });
-                }
-            }
-            
-            // Get biome name for item descriptions
-            getBiomeName() {
-                if (this.biome === BIOMES.PLAINS) return "Plains";
-                if (this.biome === BIOMES.DESERT) return "Desert";
-                if (this.biome === BIOMES.FOREST) return "Forest";
-                if (this.biome === BIOMES.WATER) return "Water";
-                if (this.biome === BIOMES.MOUNTAIN) return "Mountain";
-                return "Unknown";
             }
             
             // Mark chunk as explored and increment counter
@@ -506,32 +461,6 @@
                     const featureScreenX = screenX + feature.x;
                     const featureScreenY = screenY + feature.y;
                     
-                    // Check if this feature is being hovered or grabbed
-                    const isHovered = hoverObject && 
-                                     hoverObject.type === 'feature' && 
-                                     hoverObject.chunk === this &&
-                                     hoverObject.feature === feature;
-                    
-                    const isGrabbed = grabbedObject && 
-                                     grabbedObject.type === 'feature' && 
-                                     grabbedObject.chunk === this &&
-                                     grabbedObject.feature === feature;
-                    
-                    // Draw hover/grab effects
-                    if (isHovered || isGrabbed) {
-                        ctx.beginPath();
-                        ctx.arc(
-                            featureScreenX, 
-                            featureScreenY, 
-                            feature.size/2 + 5, 
-                            0, 
-                            Math.PI * 2
-                        );
-                        ctx.strokeStyle = isGrabbed ? 'rgba(255, 200, 0, 0.8)' : 'rgba(255, 255, 255, 0.8)';
-                        ctx.lineWidth = 2;
-                        ctx.stroke();
-                    }
-                    
                     if (feature.type === 'tree') {
                         // Draw tree trunk
                         ctx.fillStyle = '#8B4513';
@@ -554,8 +483,7 @@
                         );
                         ctx.fill();
                     } else if (feature.type === 'rock') {
-                        // Different color for draggable rocks
-                        ctx.fillStyle = feature.draggable ? '#909090' : '#707070';
+                        ctx.fillStyle = '#707070';
                         ctx.beginPath();
                         ctx.arc(
                             featureScreenX, 
@@ -565,20 +493,6 @@
                             Math.PI * 2
                         );
                         ctx.fill();
-                        
-                        // Add visual indicator for draggable rocks
-                        if (feature.draggable) {
-                            ctx.beginPath();
-                            ctx.arc(
-                                featureScreenX, 
-                                featureScreenY, 
-                                feature.size/4, 
-                                0, 
-                                Math.PI * 2
-                            );
-                            ctx.fillStyle = '#a0a0a0';
-                            ctx.fill();
-                        }
                     } else if (feature.type === 'cactus') {
                         ctx.fillStyle = '#7d9f60';
                         ctx.fillRect(
@@ -595,23 +509,6 @@
                             feature.size/2, 
                             feature.size/3
                         );
-                        
-                        // Cactus spikes
-                        ctx.strokeStyle = '#c8e6a9';
-                        ctx.lineWidth = 1;
-                        for (let i = 0; i < 8; i++) {
-                            const angle = Math.PI * 2 * (i / 8);
-                            ctx.beginPath();
-                            ctx.moveTo(
-                                featureScreenX + Math.cos(angle) * (feature.size/6),
-                                featureScreenY + Math.sin(angle) * (feature.size/6)
-                            );
-                            ctx.lineTo(
-                                featureScreenX + Math.cos(angle) * (feature.size/3),
-                                featureScreenY + Math.sin(angle) * (feature.size/3)
-                            );
-                            ctx.stroke();
-                        }
                     } else if (feature.type === 'lily') {
                         ctx.fillStyle = '#49a34d';
                         ctx.beginPath();
@@ -623,48 +520,6 @@
                             Math.PI * 2
                         );
                         ctx.fill();
-                    } else if (feature.type === 'tool') {
-                        // Draw different tools
-                        ctx.save();
-                        ctx.translate(featureScreenX, featureScreenY);
-                        
-                        if (feature.toolType === 'weapon') {
-                            // Draw sword
-                            ctx.fillStyle = '#94918e'; // Blade
-                            ctx.fillRect(-2, -12, 4, 16);
-                            
-                            ctx.fillStyle = '#654321'; // Handle
-                            ctx.fillRect(-3, 4, 6, 8);
-                            
-                            ctx.fillStyle = '#d4af37'; // Guard
-                            ctx.fillRect(-6, 4, 12, 2);
-                        } else if (feature.toolType === 'shovel') {
-                            // Draw shovel
-                            ctx.fillStyle = '#654321'; // Handle
-                            ctx.fillRect(-2, -2, 4, 16);
-                            
-                            ctx.fillStyle = '#94918e'; // Blade
-                            ctx.beginPath();
-                            ctx.ellipse(0, -8, 6, 10, 0, 0, Math.PI * 2);
-                            ctx.fill();
-                        } else if (feature.toolType === 'pickaxe') {
-                            // Draw pickaxe
-                            ctx.fillStyle = '#654321'; // Handle
-                            ctx.fillRect(-2, -2, 4, 16);
-                            
-                            ctx.fillStyle = '#94918e'; // Head
-                            ctx.beginPath();
-                            ctx.moveTo(0, -5);
-                            ctx.lineTo(-8, -12);
-                            ctx.lineTo(-6, -14);
-                            ctx.lineTo(0, -7);
-                            ctx.lineTo(6, -14);
-                            ctx.lineTo(8, -12);
-                            ctx.closePath();
-                            ctx.fill();
-                        }
-                        
-                        ctx.restore();
                     }
                 }
                 
@@ -674,23 +529,12 @@
                         const itemScreenX = screenX + item.x;
                         const itemScreenY = screenY + item.y;
                         
-                        // Check if this item is being hovered or grabbed
-                        const isHovered = hoverObject && 
-                                         hoverObject.type === 'item' && 
-                                         hoverObject.chunk === this &&
-                                         hoverObject.item === item;
-                        
-                        const isGrabbed = grabbedObject && 
-                                         grabbedObject.type === 'item' && 
-                                         grabbedObject.chunk === this &&
-                                         grabbedObject.item === item;
-                        
                         // Glow effect
                         const gradient = ctx.createRadialGradient(
                             itemScreenX, itemScreenY, 0,
                             itemScreenX, itemScreenY, item.size * 1.5
                         );
-                        gradient.addColorStop(0, item.color);
+                        gradient.addColorStop(0, this.biome.itemColor);
                         gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
                         
                         ctx.fillStyle = gradient;
@@ -699,7 +543,7 @@
                         ctx.fill();
                         
                         // Item
-                        ctx.fillStyle = item.color;
+                        ctx.fillStyle = this.biome.itemColor;
                         ctx.beginPath();
                         ctx.arc(itemScreenX, itemScreenY, item.size, 0, Math.PI * 2);
                         ctx.fill();
@@ -715,69 +559,33 @@
                             Math.PI * 2
                         );
                         ctx.fill();
-                        
-                        // Draw hover/grab effects
-                        if (isHovered || isGrabbed) {
-                            ctx.beginPath();
-                            ctx.arc(
-                                itemScreenX, 
-                                itemScreenY, 
-                                item.size + 5, 
-                                0, 
-                                Math.PI * 2
-                            );
-                            ctx.strokeStyle = isGrabbed ? 'rgba(255, 200, 0, 0.8)' : 'rgba(255, 255, 255, 0.8)';
-                            ctx.lineWidth = 2;
-                            ctx.stroke();
-                        }
                     }
                 }
             }
             
-            // Modified to return interactable objects
-            getInteractableAt(worldX, worldY, radius) {
+            // Check if player is collecting items in this chunk
+            checkItemCollection(worldX, worldY, collectionRadius) {
                 const relativeX = worldX - this.getWorldX();
                 const relativeY = worldY - this.getWorldY();
                 
-                // Check features first
-                for (const feature of this.features) {
-                    if (feature.interactable || feature.draggable) {
-                        const distance = Math.sqrt(
-                            (relativeX - feature.x) ** 2 + 
-                            (relativeY - feature.y) ** 2
-                        );
-                        
-                        if (distance < radius + feature.size/2) {
-                            return {
-                                type: 'feature',
-                                chunk: this,
-                                feature: feature,
-                                distance: distance
-                            };
-                        }
-                    }
-                }
-                
-                // Then check items
                 for (const item of this.items) {
-                    if (!item.collected && item.interactable) {
+                    if (!item.collected) {
                         const distance = Math.sqrt(
                             (relativeX - item.x) ** 2 + 
                             (relativeY - item.y) ** 2
                         );
                         
-                        if (distance < radius + item.size) {
-                            return {
-                                type: 'item',
-                                chunk: this,
-                                item: item,
-                                distance: distance
-                            };
+                        if (distance < collectionRadius + item.size) {
+                            item.collected = true;
+                            itemsCollected++;
+                            itemsCollectedDisplay.textContent = itemsCollected;
+                            
+                            // Visual feedback could be added here
+                            return true;
                         }
                     }
                 }
-                
-                return null;
+                return false;
             }
         }
         
@@ -827,424 +635,163 @@
             moveSpeedValue.textContent = moveSpeed;
         });
         
+        // Lock the mouse pointer to the canvas
+        function lockPointer() {
+            canvas.requestPointerLock = canvas.requestPointerLock || 
+                                        canvas.mozRequestPointerLock || 
+                                        canvas.webkitRequestPointerLock;
+            
+            if (canvas.requestPointerLock) {
+                canvas.requestPointerLock();
+            }
+        }
+        
+        // Update the visual crosshair position
+        function updateCrosshair(x, y) {
+            mouseCrosshair.style.left = x + 'px';
+            mouseCrosshair.style.top = y + 'px';
+        }
+        
+        // Update the reach indicator circle
+        function updateReachIndicator() {
+            // Position reach indicator at player position
+            const screenX = player.x - camera.x;
+            const screenY = player.y - camera.y;
+            
+            reachIndicator.style.left = screenX + 'px';
+            reachIndicator.style.top = screenY + 'px';
+            
+            // Set diameter to 2x arm length for full reach visualization
+            const diameter = totalLength * 2;
+            reachIndicator.style.width = diameter + 'px';
+            reachIndicator.style.height = diameter + 'px';
+        }
+        
+        // Clamp the mouse position to the maximum reach of the arm
+        function clampMousePosition(worldX, worldY) {
+            const dx = worldX - player.x;
+            const dy = worldY - player.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            // If distance exceeds arm length, clamp to the maximum reach
+            if (dist > totalLength) {
+                const ratio = totalLength / dist;
+                return {
+                    x: player.x + dx * ratio,
+                    y: player.y + dy * ratio
+                };
+            }
+            
+            return { x: worldX, y: worldY };
+        }
+        
+        // Handle pointer lock change events
+        document.addEventListener('pointerlockchange', lockChangeAlert, false);
+        document.addEventListener('mozpointerlockchange', lockChangeAlert, false);
+        document.addEventListener('webkitpointerlockchange', lockChangeAlert, false);
+        
+        function lockChangeAlert() {
+            if (document.pointerLockElement === canvas || 
+                document.mozPointerLockElement === canvas || 
+                document.webkitPointerLockElement === canvas) {
+                
+                // Pointer is locked, add event listeners
+                document.addEventListener('mousemove', updatePosition, false);
+                isPointerLocked = true;
+                document.body.classList.add('pointer-locked');
+                mouseCrosshair.style.display = 'block';
+                reachIndicator.style.display = 'block';
+                
+                // Show locked message briefly
+                lockedMessage.style.opacity = '1';
+                setTimeout(() => {
+                    lockedMessage.style.opacity = '0';
+                }, 3000);
+                
+            } else {
+                // Pointer is unlocked, remove event listeners
+                document.removeEventListener('mousemove', updatePosition, false);
+                isPointerLocked = false;
+                document.body.classList.remove('pointer-locked');
+                mouseCrosshair.style.display = 'none';
+                reachIndicator.style.display = 'none';
+            }
+        }
+        
+        // Update position based on mouse movement
+        function updatePosition(e) {
+            if (!isPointerLocked || !gameStarted) return;
+            
+            // Get mouse movement delta
+            const movementX = e.movementX || e.mozMovementX || e.webkitMovementX || 0;
+            const movementY = e.movementY || e.mozMovementY || e.webkitMovementY || 0;
+            
+            // Update the last mouse position
+            lastMouseX += movementX;
+            lastMouseY += movementY;
+            
+            // Clamp to canvas bounds
+            lastMouseX = Math.max(0, Math.min(canvas.width, lastMouseX));
+            lastMouseY = Math.max(0, Math.min(canvas.height, lastMouseY));
+            
+            // Convert screen coordinates to world coordinates
+            const worldX = lastMouseX + camera.x;
+            const worldY = lastMouseY + camera.y;
+            
+            // Clamp to arm's maximum reach
+            const clampedPosition = clampMousePosition(worldX, worldY);
+            
+            // Update crosshair to the clamped position
+            const screenX = clampedPosition.x - camera.x;
+            const screenY = clampedPosition.y - camera.y;
+            updateCrosshair(screenX, screenY);
+            
+            // Set the arm's target
+            armTargetX = clampedPosition.x;
+            armTargetY = clampedPosition.y;
+            armReachingTarget = true;
+        }
+        
         // Hide tutorial and start game
         startButton.addEventListener('click', () => {
             tutorial.classList.add('hidden');
             gameStarted = true;
             initializeArm();
+            
+            // Lock the pointer and set initial position
+            lockPointer();
+            
+            // Initialize the last mouse position to center of canvas
+            lastMouseX = canvas.width / 2;
+            lastMouseY = canvas.height / 2;
+            
+            // Show reach indicator
+            updateReachIndicator();
         });
 
-        // Track mouse movement to extend arm in real-time
-        canvas.addEventListener('mousemove', (e) => {
-            if (!gameStarted) return;
-            
-            // Get mouse position relative to canvas
-            const rect = canvas.getBoundingClientRect();
-            const screenX = e.clientX - rect.left;
-            const screenY = e.clientY - rect.top;
-            
-            // Convert screen coordinates to world coordinates
-            const worldX = screenX + camera.x;
-            const worldY = screenY + camera.y;
-            
-            // Set the arm's target to follow the mouse position
-            armTargetX = worldX;
-            armTargetY = worldY;
-            armReachingTarget = true;
-            
-            // Check for interactable objects under the cursor/arm end
-            updateHoverObject();
-        });
-
-        // Handle click for movement (only controls player movement now)
+        // Modified canvas click handler to work with pointer lock
         canvas.addEventListener('click', (e) => {
             if (!gameStarted) return;
             
-            // Get click position relative to canvas
-            const rect = canvas.getBoundingClientRect();
-            const screenX = e.clientX - rect.left;
-            const screenY = e.clientY - rect.top;
+            // Use the last known mouse position for clicks when pointer is locked
+            let screenX, screenY;
+            
+            if (isPointerLocked) {
+                screenX = lastMouseX;
+                screenY = lastMouseY;
+            } else {
+                // Fallback to regular event handling if not locked
+                const rect = canvas.getBoundingClientRect();
+                screenX = e.clientX - rect.left;
+                screenY = e.clientY - rect.top;
+            }
             
             // Convert screen coordinates to world coordinates
-            const worldX = screenX + camera.x;
-            const worldY = screenY + camera.y;
-            
-            // If in grab mode and arm is close enough to target
-            if (interactionMode === 'Grab') {
-                const endEffector = segments[segments.length - 1];
-                const distToArm = distance(
-                    { x: worldX, y: worldY },
-                    { x: endEffector.x, y: endEffector.y }
-                );
-                
-                if (distToArm < 30) { // Only grab if close to arm end
-                    if (hoverObject) {
-                        // Grab the object
-                        grabbedObject = hoverObject;
-                        
-                        // If it's an item that can be collected
-                        if (grabbedObject.type === 'item' && !grabbedObject.item.requiresGrab) {
-                            collectItem(grabbedObject.chunk, grabbedObject.item);
-                            grabbedObject = null;
-                        } else if (grabbedObject.type === 'feature' && grabbedObject.feature.pickupable) {
-                            addToInventory(grabbedObject.feature);
-                            // Remove from world
-                            const featureIndex = grabbedObject.chunk.features.indexOf(grabbedObject.feature);
-                            if (featureIndex !== -1) {
-                                grabbedObject.chunk.features.splice(featureIndex, 1);
-                            }
-                            grabbedObject = null;
-                        }
-                    }
-                } else {
-                    // If clicking elsewhere while grabbing, release the object
-                    releaseGrabbedObject();
-                    
-                    // Move player to clicked location
-                    player.targetX = worldX;
-                    player.targetY = worldY;
-                    player.isMoving = true;
-                }
-            } else {
-                // In reach mode, just move player
-                player.targetX = worldX;
-                player.targetY = worldY;
-                player.isMoving = true;
-            }
+            player.targetX = screenX + camera.x;
+            player.targetY = screenY + camera.y;
+            player.isMoving = true;
         });
 
-        // Add keyboard controls
-        document.addEventListener('keydown', (e) => {
-            if (!gameStarted) return;
-            
-            if (e.key === 'g' || e.key === 'G') {
-                // Toggle grab mode
-                interactionMode = (interactionMode === 'Reach') ? 
-                    'Grab' : 'Reach';
-                interactionModeDisplay.textContent = interactionMode;
-                
-                // Release any grabbed object when switching modes
-                releaseGrabbedObject();
-            } else if (e.key >= '1' && e.key <= '5') {
-                // Switch inventory slots
-                const slotIndex = parseInt(e.key) - 1;
-                setActiveInventorySlot(slotIndex);
-            } else if (e.key === ' ') {
-                // Use currently equipped item
-                useEquippedItem();
-            }
-        });
-        
-        // Release any grabbed object
-        function releaseGrabbedObject() {
-            if (grabbedObject) {
-                // If it's a collected item, add to inventory
-                if (grabbedObject.type === 'item' && grabbedObject.item.requiresGrab) {
-                    collectItem(grabbedObject.chunk, grabbedObject.item);
-                }
-                grabbedObject = null;
-            }
-        }
-        
-        // Add item to inventory
-        function addToInventory(object) {
-            // Find first empty slot
-            for (let i = 0; i < inventoryItems.length; i++) {
-                if (inventoryItems[i] === null) {
-                    inventoryItems[i] = object;
-                    updateInventoryDisplay();
-                    return true;
-                }
-            }
-            return false; // Inventory full
-        }
-        
-        // Update inventory display
-        function updateInventoryDisplay() {
-            const slots = inventoryElement.querySelectorAll('.inventory-slot');
-            
-            slots.forEach((slot, index) => {
-                // Clear slot
-                slot.innerHTML = '';
-                
-                // Remove active class from all slots
-                slot.classList.remove('active');
-                
-                // Add item if exists
-                if (inventoryItems[index] !== null) {
-                    const item = inventoryItems[index];
-                    const itemEl = document.createElement('div');
-                    itemEl.className = 'inventory-item';
-                    
-                    // Style based on type
-                    if (item.toolType === 'weapon') {
-                        itemEl.style.backgroundColor = '#94918e';
-                    } else if (item.toolType === 'shovel') {
-                        itemEl.style.backgroundColor = '#8B4513';
-                    } else if (item.toolType === 'pickaxe') {
-                        itemEl.style.backgroundColor = '#707070';
-                    } else {
-                        itemEl.style.backgroundColor = item.color || '#fff';
-                    }
-                    
-                    slot.appendChild(itemEl);
-                }
-                
-                // Mark active slot
-                if (index === activeSlot) {
-                    slot.classList.add('active');
-                }
-            });
-        }
-        
-        // Set active inventory slot
-        function setActiveInventorySlot(index) {
-            if (index >= 0 && index < inventoryItems.length) {
-                activeSlot = index;
-                updateInventoryDisplay();
-            }
-        }
-        
-        // Use the currently equipped item
-        function useEquippedItem() {
-            const equippedItem = inventoryItems[activeSlot];
-            if (!equippedItem) return;
-            
-            // Different effects based on tool type
-            if (equippedItem.toolType === 'weapon') {
-                // Weapon attack logic
-                const endEffector = segments[segments.length - 1];
-                
-                // Create attack effect
-                ctx.beginPath();
-                ctx.arc(
-                    endEffector.x - camera.x, 
-                    endEffector.y - camera.y, 
-                    40, 
-                    0, 
-                    Math.PI * 2
-                );
-                ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
-                ctx.lineWidth = 3;
-                ctx.stroke();
-                
-                // Check for enemies in attack range
-                // (Would add actual enemies and damage logic here)
-            } else if (equippedItem.toolType === 'shovel') {
-                // Shovel digging logic
-                // Could modify terrain or dig for items
-            } else if (equippedItem.toolType === 'pickaxe') {
-                // Pickaxe mining logic
-                // Could break rocks or mine for resources
-            }
-        }
-        
-        // Collect an item
-        function collectItem(chunk, item) {
-            if (!item.collected) {
-                item.collected = true;
-                itemsCollected++;
-                itemsCollectedDisplay.textContent = itemsCollected;
-                
-                // Add special items to inventory
-                if (item.requiresGrab) {
-                    const inventoryItem = {
-                        name: item.name,
-                        color: item.color,
-                        value: item.value
-                    };
-                    addToInventory(inventoryItem);
-                }
-            }
-        }
-        
-        // Update hover object based on arm position
-        function updateHoverObject() {
-            // Only check for hoverable objects in grab mode or if nothing is grabbed
-            if (interactionMode !== 'Grab' || grabbedObject === null) {
-                hoverObject = null;
-                return;
-            }
-            
-            const endEffector = segments[segments.length - 1];
-            
-            // Get chunks near the arm end
-            const chunkX = Math.floor(endEffector.x / CHUNK_SIZE);
-            const chunkY = Math.floor(endEffector.y / CHUNK_SIZE);
-            
-            // Check surrounding chunks for interactable objects
-            let closestInteractable = null;
-            let closestDistance = Infinity;
-            
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    const chunk = getChunk(chunkX + dx, chunkY + dy);
-                    const interactable = chunk.getInteractableAt(endEffector.x, endEffector.y, 30);
-                    
-                    if (interactable && interactable.distance < closestDistance) {
-                        closestInteractable = interactable;
-                        closestDistance = interactable.distance;
-                    }
-                }
-            }
-            
-            // Update the hover object
-            hoverObject = closestInteractable;
-            
-            // Update tooltip if hovering over an object
-            updateTooltip();
-        }
-        
-        // Update tooltip display
-        function updateTooltip() {
-            let tooltip = document.getElementById('tooltip');
-            if (!tooltip) {
-                tooltip = document.createElement('div');
-                tooltip.id = 'tooltip';
-                tooltip.className = 'item-tooltip';
-                tooltip.style.display = 'none';
-                document.body.appendChild(tooltip);
-            }
-            
-            if (hoverObject) {
-                const object = hoverObject.type === 'feature' ? hoverObject.feature : hoverObject.item;
-                const screenX = (hoverObject.type === 'feature' ? 
-                                hoverObject.chunk.getWorldX() + hoverObject.feature.x : 
-                                hoverObject.chunk.getWorldX() + hoverObject.item.x) - camera.x;
-                const screenY = (hoverObject.type === 'feature' ? 
-                                hoverObject.chunk.getWorldY() + hoverObject.feature.y : 
-                                hoverObject.chunk.getWorldY() + hoverObject.item.y) - camera.y;
-                
-                // Set tooltip content based on object type
-                let tooltipText = '';
-                if (hoverObject.type === 'feature' && hoverObject.feature.name) {
-                    tooltipText = hoverObject.feature.name;
-                    if (hoverObject.feature.draggable) tooltipText += ' (Draggable)';
-                    if (hoverObject.feature.pickupable) tooltipText += ' (Pickup)';
-                } else if (hoverObject.type === 'item') {
-                    tooltipText = hoverObject.item.name || 'Item';
-                    if (hoverObject.item.value) tooltipText += ` (Value: ${hoverObject.item.value})`;
-                    if (hoverObject.item.requiresGrab) tooltipText += ' (Grab to collect)';
-                }
-                
-                tooltip.textContent = tooltipText;
-                tooltip.style.left = `${screenX}px`;
-                tooltip.style.top = `${screenY}px`;
-                tooltip.style.display = 'block';
-            } else {
-                tooltip.style.display = 'none';
-            }
-        }
-        
-        // Enhanced fabrik algorithm with collision detection
-        function fabrikWithCollision(target) {
-            if (segments.length < 2) return false;
-            
-            // Standard FABRIK first
-            const result = fabrik(target);
-            
-            // Then check for collisions
-            checkArmCollisions();
-            
-            return result;
-        }
-        
-        // Check arm segments for collisions with objects
-        function checkArmCollisions() {
-            // For each arm segment
-            for (let i = 0; i < segments.length - 1; i++) {
-                const segmentStart = segments[i];
-                const segmentEnd = segments[i+1];
-                
-                // Get chunks that this segment might intersect
-                const startChunkX = Math.floor(segmentStart.x / CHUNK_SIZE);
-                const startChunkY = Math.floor(segmentStart.y / CHUNK_SIZE);
-                const endChunkX = Math.floor(segmentEnd.x / CHUNK_SIZE);
-                const endChunkY = Math.floor(segmentEnd.y / CHUNK_SIZE);
-                
-                // Check all chunks in the rectangle bounded by these points
-                const minChunkX = Math.min(startChunkX, endChunkX);
-                const maxChunkX = Math.max(startChunkX, endChunkX);
-                const minChunkY = Math.min(startChunkY, endChunkY);
-                const maxChunkY = Math.max(startChunkY, endChunkY);
-                
-                for (let cx = minChunkX; cx <= maxChunkX; cx++) {
-                    for (let cy = minChunkY; cy <= maxChunkY; cy++) {
-                        const chunk = getChunk(cx, cy);
-                        
-                        // Check collision with features in this chunk
-                        for (const feature of chunk.features) {
-                            if (feature.collidable) {
-                                const featureWorldX = chunk.getWorldX() + feature.x;
-                                const featureWorldY = chunk.getWorldY() + feature.y;
-                                
-                                // Simple distance check for now (could be more complex for different shapes)
-                                const collision = lineCircleIntersection(
-                                    segmentStart.x, segmentStart.y,
-                                    segmentEnd.x, segmentEnd.y,
-                                    featureWorldX, featureWorldY,
-                                    feature.size / 2
-                                );
-                                
-                                if (collision) {
-                                    // Handle collision by adjusting the segment end point
-                                    // This is a simplified approach - could be more physically accurate
-                                    const dirToFeature = direction(
-                                        { x: featureWorldX, y: featureWorldY },
-                                        segmentEnd
-                                    );
-                                    
-                                    // Move segment end away from collision
-                                    segmentEnd.x = featureWorldX + dirToFeature.x * (feature.size / 2 + 5);
-                                    segmentEnd.y = featureWorldY + dirToFeature.y * (feature.size / 2 + 5);
-                                    
-                                    // If this is a damaging object like cacti
-                                    if (feature.damaging) {
-                                        // Visual feedback for damage
-                                        ctx.beginPath();
-                                        ctx.arc(
-                                            featureWorldX - camera.x, 
-                                            featureWorldY - camera.y, 
-                                            feature.size, 
-                                            0, 
-                                            Math.PI * 2
-                                        );
-                                        ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
-                                        ctx.fill();
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Check if a line segment intersects with a circle
-        function lineCircleIntersection(x1, y1, x2, y2, cx, cy, r) {
-            // Convert line to vector form
-            const dx = x2 - x1;
-            const dy = y2 - y1;
-            
-            // Solve quadratic equation
-            const a = dx * dx + dy * dy;
-            const b = 2 * (dx * (x1 - cx) + dy * (y1 - cy));
-            const c = (x1 - cx) * (x1 - cx) + (y1 - cy) * (y1 - cy) - r * r;
-            
-            const discriminant = b * b - 4 * a * c;
-            
-            if (discriminant < 0) {
-                return false; // No intersection
-            }
-            
-            // Find the closest intersection point
-            const t1 = (-b + Math.sqrt(discriminant)) / (2 * a);
-            const t2 = (-b - Math.sqrt(discriminant)) / (2 * a);
-            
-            // Check if intersection is on the line segment
-            return (t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1);
-        }
-        
         // Calculate distance between two points
         function distance(p1, p2) {
             const dx = p2.x - p1.x;
@@ -1436,16 +983,25 @@
                     // Update camera to follow player
                     camera.x = player.x - canvas.width / 2;
                     camera.y = player.y - canvas.height / 2;
+                    
+                    // Update reach indicator position after player movement
+                    updateReachIndicator();
+                    
+                    // If pointer is locked, also update the cursor position
+                    // to keep it relative to the player
+                    if (isPointerLocked && armTargetX !== null && armTargetY !== null) {
+                        // Calculate new screen position for cursor
+                        const screenX = armTargetX - camera.x;
+                        const screenY = armTargetY - camera.y;
+                        updateCrosshair(screenX, screenY);
+                    }
                 }
             }
             
             // Update arm target position gradually
             updateArmTarget();
-            
-            // Move grabbed object with arm
-            updateGrabbedObject();
         }
-
+        
         // Update the arm's target position with realistic movement speed
         function updateArmTarget() {
             if (armTargetX === null || armTargetY === null) {
@@ -1481,54 +1037,8 @@
             // Mark the chunk as explored
             chunk.markExplored();
             
-            // Check for item collection directly instead of calling a non-existent method
-            const relativeX = player.x - chunk.getWorldX();
-            const relativeY = player.y - chunk.getWorldY();
-            const collectionRadius = 20; // Collection radius
-            
-            for (const item of chunk.items) {
-                if (!item.collected && !item.requiresGrab) { // Only auto-collect items that don't need grabbing
-                    const distance = Math.sqrt(
-                        (relativeX - item.x) ** 2 + 
-                        (relativeY - item.y) ** 2
-                    );
-                    
-                    if (distance < collectionRadius + item.size) {
-                        collectItem(chunk, item);
-                    }
-                }
-            }
-            
-            // Also check neighboring chunks for items close to chunk borders
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    if (dx === 0 && dy === 0) continue; // Skip the center chunk we already checked
-                    
-                    const neighborChunk = getChunk(chunkX + dx, chunkY + dy);
-                    const neighborRelativeX = player.x - neighborChunk.getWorldX();
-                    const neighborRelativeY = player.y - neighborChunk.getWorldY();
-                    
-                    // Only check if player is close to the edge
-                    if (neighborRelativeX >= -collectionRadius && 
-                        neighborRelativeX <= CHUNK_SIZE + collectionRadius &&
-                        neighborRelativeY >= -collectionRadius && 
-                        neighborRelativeY <= CHUNK_SIZE + collectionRadius) {
-                        
-                        for (const item of neighborChunk.items) {
-                            if (!item.collected && !item.requiresGrab) {
-                                const distance = Math.sqrt(
-                                    (neighborRelativeX - item.x) ** 2 + 
-                                    (neighborRelativeY - item.y) ** 2
-                                );
-                                
-                                if (distance < collectionRadius + item.size) {
-                                    collectItem(neighborChunk, item);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            // Check for item collection
+            chunk.checkItemCollection(player.x, player.y, 20); // 20 is collection radius
         }
         
         // Draw the visible world chunks
@@ -1646,183 +1156,6 @@
                 ctx.fillStyle = 'rgba(100, 255, 100, 0.6)';
                 ctx.fill();
             }
-            
-            // Draw reach limits
-            drawReachLimits();
-            
-            // Draw currently equipped item
-            const equippedItem = inventoryItems[activeSlot];
-            if (equippedItem) {
-                const lastJoint = segments[segments.length - 1];
-                const screenLastJoint = {
-                    x: lastJoint.x - camera.x,
-                    y: lastJoint.y - camera.y
-                };
-                
-                // Draw the equipped item at the arm end
-                ctx.save();
-                ctx.translate(screenLastJoint.x, screenLastJoint.y);
-                
-                if (equippedItem.toolType === 'weapon') {
-                    // Draw sword
-                    ctx.fillStyle = '#94918e'; // Blade
-                    ctx.fillRect(-2, -16, 4, 16);
-                    
-                    ctx.fillStyle = '#654321'; // Handle
-                    ctx.fillRect(-3, 0, 6, 8);
-                    
-                    ctx.fillStyle = '#d4af37'; // Guard
-                    ctx.fillRect(-6, 0, 12, 2);
-                } else if (equippedItem.toolType === 'shovel') {
-                    // Draw shovel
-                    ctx.fillStyle = '#654321'; // Handle
-                    ctx.fillRect(-2, 0, 4, 16);
-                    
-                    ctx.fillStyle = '#94918e'; // Blade
-                    ctx.beginPath();
-                    ctx.ellipse(0, -6, 6, 10, 0, 0, Math.PI * 2);
-                    ctx.fill();
-                } else if (equippedItem.toolType === 'pickaxe') {
-                    // Draw pickaxe
-                    ctx.fillStyle = '#654321'; // Handle
-                    ctx.fillRect(-2, 0, 4, 16);
-                    
-                    ctx.fillStyle = '#94918e'; // Head
-                    ctx.beginPath();
-                    ctx.moveTo(0, -2);
-                    ctx.lineTo(-8, -10);
-                    ctx.lineTo(-6, -12);
-                    ctx.lineTo(0, -4);
-                    ctx.lineTo(6, -12);
-                    ctx.lineTo(8, -10);
-                    ctx.closePath();
-                    ctx.fill();
-                } else {
-                    // Draw generic item
-                    ctx.fillStyle = equippedItem.color || '#fff';
-                    ctx.beginPath();
-                    ctx.arc(0, 0, 8, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-                
-                ctx.restore();
-            }
-        }
-
-        // Draw visual feedback for arm reach limit
-        function drawReachLimits() {
-            const baseX = player.x - camera.x;
-            const baseY = player.y - camera.y;
-            
-            // Maximum reach distance
-            const maxReach = totalLength;
-            
-            // Draw reach limit indicator
-            ctx.beginPath();
-            ctx.arc(baseX, baseY, maxReach, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-            ctx.setLineDash([5, 5]);
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            ctx.setLineDash([]);
-            
-            // Draw interaction mode indicator
-            ctx.fillStyle = interactionMode === 'Grab' ? 
-                           'rgba(255, 200, 0, 0.3)' : 'rgba(100, 200, 255, 0.3)';
-            ctx.beginPath();
-            ctx.arc(baseX, baseY, 20, 0, Math.PI * 2);
-            ctx.fill();
-            
-            // Draw reach/grab icon
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 2;
-            
-            if (interactionMode === 'Grab') {
-                // Draw grab hand icon
-                ctx.beginPath();
-                ctx.arc(baseX, baseY, 10, 0, Math.PI * 2);
-                ctx.moveTo(baseX - 5, baseY);
-                ctx.lineTo(baseX + 5, baseY);
-                ctx.moveTo(baseX, baseY - 5);
-                ctx.lineTo(baseX, baseY + 5);
-                ctx.stroke();
-            } else {
-                // Draw reach arrow icon
-                ctx.beginPath();
-                ctx.moveTo(baseX, baseY - 8);
-                ctx.lineTo(baseX + 8, baseY);
-                ctx.lineTo(baseX, baseY + 8);
-                ctx.stroke();
-            }
-        }
-
-        // Update grabbed object position to follow arm
-        function updateGrabbedObject() {
-            if (!grabbedObject) return;
-            
-            const endEffector = segments[segments.length - 1];
-            
-            if (grabbedObject.type === 'feature') {
-                // Move the feature to follow the arm
-                const feature = grabbedObject.feature;
-                const chunk = grabbedObject.chunk;
-                
-                // Calculate new relative position
-                feature.x = endEffector.x - chunk.getWorldX();
-                feature.y = endEffector.y - chunk.getWorldY();
-                
-                // Apply physics for heavy objects
-                if (feature.weight) {
-                    // Slow down player movement based on weight
-                    const weightFactor = Math.max(0.1, 1 - feature.weight * 0.1);
-                    player.x += (targetPoint.x - player.x) * 0.05 * weightFactor;
-                    player.y += (targetPoint.y - player.y) * 0.05 * weightFactor;
-                }
-            } else if (grabbedObject.type === 'item') {
-                // Move the item to follow the arm
-                const item = grabbedObject.item;
-                const chunk = grabbedObject.chunk;
-                
-                // Calculate new relative position
-                item.x = endEffector.x - chunk.getWorldX();
-                item.y = endEffector.y - chunk.getWorldY();
-            }
-        }
-        
-        // Modified update player movement to handle grabbed objects
-        function updatePlayerMovement() {
-            if (player.isMoving && player.targetX !== null && player.targetY !== null) {
-                const dir = direction(
-                    { x: player.x, y: player.y }, 
-                    { x: player.targetX, y: player.targetY }
-                );
-                
-                const dist = distance(
-                    { x: player.x, y: player.y }, 
-                    { x: player.targetX, y: player.targetY }
-                );
-                
-                // If we're close enough to the target, stop moving
-                if (dist < 5) {
-                    player.isMoving = false;
-                    player.targetX = null;
-                    player.targetY = null;
-                } else {
-                    // Move player towards target
-                    player.x += dir.x * moveSpeed;
-                    player.y += dir.y * moveSpeed;
-                    
-                    // Update camera to follow player
-                    camera.x = player.x - canvas.width / 2;
-                    camera.y = player.y - canvas.height / 2;
-                }
-            }
-            
-            // Update arm target position gradually
-            updateArmTarget();
-            
-            // Move grabbed object with arm
-            updateGrabbedObject();
         }
 
         // Animation loop
@@ -1840,14 +1173,22 @@
                 // Draw world
                 drawVisibleChunks();
                 
-                // Apply FABRIK with collision detection to reach target point
-                fabrikWithCollision(targetPoint);
+                // Apply FABRIK to reach target point
+                fabrik(targetPoint);
                 
                 // Draw player (arm)
                 drawPlayer();
                 
-                // Update hover status based on arm position
-                updateHoverObject();
+                // Draw maximum reach circle (debug visualization)
+                const screenX = player.x - camera.x;
+                const screenY = player.y - camera.y;
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, totalLength, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                ctx.setLineDash([5, 5]);
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.setLineDash([]);
             }
             
             // Schedule the next frame
@@ -1855,13 +1196,7 @@
         }
 
         // Initialize game
-        function init() {
-            initializeArm();
-            updateInventoryDisplay();
-        }
-
-        // Initialize game
-        init();
+        initializeArm();
         animate();
     </script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
