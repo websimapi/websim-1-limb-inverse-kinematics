@@ -610,8 +610,25 @@
             const screenY = e.clientY - rect.top;
             
             // Convert screen coordinates to world coordinates
-            player.targetX = screenX + camera.x;
-            player.targetY = screenY + camera.y;
+            const clickWorldX = screenX + camera.x;
+            const clickWorldY = screenY + camera.y;
+            
+            // Calculate distance to click
+            const clickDist = distance({ x: player.x, y: player.y }, { x: clickWorldX, y: clickWorldY });
+            
+            // If click is beyond arm reach, adjust the target position
+            if (clickDist > totalLength) {
+                // Get direction from player to click
+                const dir = direction({ x: player.x, y: player.y }, { x: clickWorldX, y: clickWorldY });
+                
+                // Set the target to be at the maximum reach distance in the click direction
+                player.targetX = player.x + dir.x * totalLength;
+                player.targetY = player.y + dir.y * totalLength;
+            } else {
+                // If within reach, use the clicked position directly
+                player.targetX = clickWorldX;
+                player.targetY = clickWorldY;
+            }
             
             player.isMoving = true;
         });
