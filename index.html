@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1-Limb Inverse Kinematics</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #222;
+            font-family: Arial, sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+        
+        .container {
+            text-align: center;
+        }
+        
+        canvas {
+            background-color: #333;
+            border: 1px solid #555;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Inverse Kinematics Demo</h1>
+        <p>Move your cursor to control the arm's end point</p>
+        <canvas id="ikCanvas" width="800" height="500"></canvas>
+    </div>
+    
+    <script>
+        // Setup canvas
+        const canvas = document.getElementById('ikCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Arm configuration
+        const baseX = canvas.width / 2;
+        const baseY = canvas.height / 2;
+        const upperArmLength = 150;
+        const forearmLength = 120;
+
+        // Target position (will be updated by mouse movement)
+        let targetX = baseX + 100;
+        let targetY = baseY - 50;
+
+        // Handle mouse movement
+        canvas.addEventListener('mousemove', (e) => {
+            // Get mouse position relative to canvas
+            const rect = canvas.getBoundingClientRect();
+            targetX = e.clientX - rect.left;
+            targetY = e.clientY - rect.top;
+        });
+
+        // Calculate arm angles using inverse kinematics
+        function calculateIK(targetX, targetY) {
+            // Calculate distance from base to target
+            const dx = targetX - baseX;
+            const dy = targetY - baseY;
+            const targetDistance = Math.sqrt(dx * dx + dy * dy);
+            
+            // Clamp target distance to prevent impossible positions
+            const clampedDistance = Math.min(
+                targetDistance, 
+                upperArmLength + forearmLength - 1
+            );
+            
+            // Use law of cosines to find elbow angle
+            // c² = a² + b² - 2ab·cosC
+            // where a = upperArmLength, b = forearmLength, c = clampedDistance
+            const cosElbow = (
+                Math.pow(upperArmLength, 2) + 
+                Math.pow(forearmLength, 2) - 
+                Math.pow(clampedDistance, 2)
+            ) / (2 * upperArmLength * forearmLength);
+            
+            // Prevent domain errors with acos
+            const clampedCosElbow = Math.max(-1, Math.min(1, cosElbow));
+            const elbowAngle = Math.acos(clampedCosElbow);
+            
+            // Calculate shoulder angle
+            const targetAngle = Math.atan2(dy, dx);
+            
+            // Find the angle between upper arm and the line to target
+            const cosShoulderOffset = (
+                Math.pow(upperArmLength, 2) + 
+                Math.pow(clampedDistance, 2) - 
+                Math.pow(forearmLength, 2)
+            ) / (2 * upperArmLength * clampedDistance);
+            
+            // Prevent domain errors
+            const clampedCosShoulderOffset = Math.max(-1, Math.min(1, cosShoulderOffset));
+            const shoulderOffset = Math.acos(clampedCosShoulderOffset);
+            
+            // Final shoulder angle
+            const shoulderAngle = targetAngle - shoulderOffset;
+
+            return {
+                shoulder: shoulderAngle,
+                elbow: Math.PI - elbowAngle // Convert to external angle
+            };
+        }
+
+        // Draw the arm
+        function drawArm(shoulderAngle, elbowAngle) {
+            // Calculate joint positions
+            const elbowX = baseX + Math.cos(shoulderAngle) * upperArmLength;
+            const elbowY = baseY + Math.sin(shoulderAngle) * upperArmLength;
+            
+            const wristAngle = shoulderAngle + elbowAngle;
+            const wristX = elbowX + Math.cos(wristAngle) * forearmLength;
+            const wristY = elbowY + Math.sin(wristAngle) * forearmLength;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw target
+            ctx.beginPath();
+            ctx.arc(targetX, targetY, 10, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 100, 100, 0.7)';
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Draw line to target (to show difference between target and actual end position)
+            ctx.beginPath();
+            ctx.moveTo(wristX, wristY);
+            ctx.lineTo(targetX, targetY);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Draw base
+            ctx.beginPath();
+            ctx.arc(baseX, baseY, 15, 0, Math.PI * 2);
+            ctx.fillStyle = '#888';
+            ctx.fill();
+            ctx.strokeStyle = '#aaa';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Create gradient for upper arm
+            const upperArmGradient = ctx.createLinearGradient(
+                baseX, baseY, elbowX, elbowY
+            );
+            upperArmGradient.addColorStop(0, '#6a89cc');
+            upperArmGradient.addColorStop(1, '#4a69bd');
+            
+            // Draw upper arm
+            ctx.beginPath();
+            ctx.moveTo(baseX, baseY);
+            ctx.lineTo(elbowX, elbowY);
+            ctx.lineWidth = 15;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = upperArmGradient;
+            ctx.stroke();
+            
+            // Draw elbow joint
+            ctx.beginPath();
+            ctx.arc(elbowX, elbowY, 10, 0, Math.PI * 2);
+            ctx.fillStyle = '#4a69bd';
+            ctx.fill();
+            ctx.strokeStyle = '#aaa';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Create gradient for forearm
+            const forearmGradient = ctx.createLinearGradient(
+                elbowX, elbowY, wristX, wristY
+            );
+            forearmGradient.addColorStop(0, '#4a69bd');
+            forearmGradient.addColorStop(1, '#1e3799');
+            
+            // Draw forearm
+            ctx.beginPath();
+            ctx.moveTo(elbowX, elbowY);
+            ctx.lineTo(wristX, wristY);
+            ctx.lineWidth = 12;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = forearmGradient;
+            ctx.stroke();
+            
+            // Draw wrist/end effector
+            ctx.beginPath();
+            ctx.arc(wristX, wristY, 8, 0, Math.PI * 2);
+            ctx.fillStyle = '#1e3799';
+            ctx.fill();
+            ctx.strokeStyle = '#aaa';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        // Animation loop
+        function animate() {
+            // Calculate IK
+            const angles = calculateIK(targetX, targetY);
+            
+            // Draw the arm
+            drawArm(angles.shoulder, angles.elbow);
+            
+            // Schedule the next frame
+            requestAnimationFrame(animate);
+        }
+
+        // Start animation
+        animate();
+    </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
+
